@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0b0f19"/>
+      <stop offset="100%" stop-color="#05070c"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#1d8cf8"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="115" fill="url(#bg)" stroke="#1e293b" stroke-width="8"/>
+  <!-- Hevy/Alfa Gym Interlocking Dumbbell/A Path -->
+  <path d="M180 150 H145 C120 150 105 168 105 192 V320 C105 344 120 362 145 362 H185 C208 362 224 345 236 322 L276 190 C288 167 304 150 327 150 H367 C392 150 407 168 407 192 V320 C407 344 392 362 367 362 H332"
+        fill="none" stroke="#ffffff" stroke-width="38" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="180" cy="235" r="18" fill="url(#accent)"/>
+  <circle cx="332" cy="277" r="18" fill="url(#accent)"/>
+</svg>

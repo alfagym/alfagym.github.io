@@ -30,7 +30,7 @@ import CloudSyncModal from './components/CloudSyncModal';
 import './App.css';
 
 /* global __BUILD_TIMESTAMP__ */
-const FALLBACK_TIMESTAMP = '11:34 PM - 11/06/2026';
+const FALLBACK_TIMESTAMP = '11:38 PM - 11/06/2026';
 const BUILD_TIMESTAMP =
   typeof __BUILD_TIMESTAMP__ !== 'undefined'
     ? __BUILD_TIMESTAMP__
@@ -62,12 +62,39 @@ function getUserStorageKey(user) {
 }
 
 function loadUserRoutines(userKey) {
+  const deletedRaw = localStorage.getItem(
+    `alfa_gym_deleted_routines_${userKey}`
+  );
+  const deletedIds = deletedRaw ? JSON.parse(deletedRaw) : [];
+
+  const mergeMissingHevyRoutines = (savedList) => {
+    const hevyDefaults = DEFAULT_ROUTINES.filter((dr) =>
+      dr.id.startsWith('routine-hevy-')
+    );
+    const savedById = {};
+    for (const r of savedList) {
+      savedById[r.id] = r;
+    }
+    // Keep all 6 Hevy routines in 1-6 order at the top (using the user's edited version if already saved, unless deleted)
+    const topHevy = [];
+    for (const hd of hevyDefaults) {
+      if (deletedIds.includes(hd.id)) continue;
+      if (savedById[hd.id]) {
+        topHevy.push(savedById[hd.id]);
+      } else {
+        topHevy.push(JSON.parse(JSON.stringify(hd)));
+      }
+    }
+    const others = savedList.filter((r) => !r.id.startsWith('routine-hevy-'));
+    return [...topHevy, ...others];
+  };
+
   try {
     const userSaved = localStorage.getItem(`alfa_gym_routines_${userKey}`);
     if (userSaved) {
       const parsed = JSON.parse(userSaved);
-      if (Array.isArray(parsed)) {
-        return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return mergeMissingHevyRoutines(parsed);
       }
     }
     // Initial migration for Raydel if legacy key exists
@@ -76,16 +103,7 @@ function loadUserRoutines(userKey) {
       if (legacy) {
         const parsedLegacy = JSON.parse(legacy);
         if (Array.isArray(parsedLegacy) && parsedLegacy.length > 0) {
-          const hevyDefaults = DEFAULT_ROUTINES.filter((dr) =>
-            dr.id.startsWith('routine-hevy-')
-          );
-          const nonHevySaved = parsedLegacy.filter(
-            (p) => !p.id.startsWith('routine-hevy-')
-          );
-          const merged = [
-            ...JSON.parse(JSON.stringify(hevyDefaults)),
-            ...nonHevySaved,
-          ];
+          const merged = mergeMissingHevyRoutines(parsedLegacy);
           localStorage.setItem(
             `alfa_gym_routines_${userKey}`,
             JSON.stringify(merged)
@@ -300,6 +318,45 @@ export default function App() {
       }
     }
   };
+
+  // Automatic Live Update Checker for Mobile / iOS Home Screen PWA
+  useEffect(() => {
+    const checkRemoteUpdate = async () => {
+      try {
+        const res = await fetch(`./version.json?t=${Date.now()}`, {
+          cache: 'no-store',
+          headers: { 'Cache-Control': 'no-cache' },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (
+          data &&
+          data.buildTimestamp &&
+          data.buildTimestamp !== BUILD_TIMESTAMP
+        ) {
+          const nextUrl = `${window.location.pathname}?v=${data.buildId || Date.now()}`;
+          window.location.replace(nextUrl);
+        }
+      } catch {
+        // ignore network errors while offline
+      }
+    };
+
+    checkRemoteUpdate();
+    const interval = setInterval(checkRemoteUpdate, 15000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        checkRemoteUpdate();
+      }
+    };
+    window.addEventListener('focus', checkRemoteUpdate);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', checkRemoteUpdate);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
 
   // Persist Global Settings & Per-User Data to LocalStorage
   useEffect(() => {
@@ -915,9 +972,18 @@ export default function App() {
         />
       )}
 
-      {/* Global Rule Corner Timestamp */}
-      <div className="corner-timestamp">
-        {t.updatedPrefix} {BUILD_TIMESTAMP}
+      {/* Global Rule Corner Timestamp (Tap to force instant update on mobile) */}
+      <div
+        className="corner-timestamp"
+        onClick={() =>
+          window.location.replace(
+            `${window.location.pathname}?v=${Date.now()}`
+          )
+        }
+        style={{ cursor: 'pointer', pointerEvents: 'auto' }}
+        title="Toca para buscar actualización ahora"
+      >
+        {t.updatedPrefix} {BUILD_TIMESTAMP} ↻
       </div>
     </div>
   );

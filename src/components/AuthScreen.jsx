@@ -306,9 +306,18 @@ export default function AuthScreen({
         </div>
       </div>
 
-      {/* Global Rule Corner Timestamp */}
-      <div className="corner-timestamp">
-        {t.updatedPrefix} {buildTimestamp}
+      {/* Global Rule Corner Timestamp (Tap to force instant update on mobile) */}
+      <div
+        className="corner-timestamp"
+        onClick={() =>
+          window.location.replace(
+            `${window.location.pathname}?v=${Date.now()}`
+          )
+        }
+        style={{ cursor: 'pointer', pointerEvents: 'auto' }}
+        title="Toca para buscar actualización ahora"
+      >
+        {t.updatedPrefix} {buildTimestamp} ↻
       </div>
     </div>
   );

@@ -22,4 +22,13 @@ export default defineConfig({
   define: {
     __BUILD_TIMESTAMP__: JSON.stringify(buildTimestamp),
   },
+  build: {
+    rollupOptions: {
+      output: {
+        entryFileNames: 'assets/index.js',
+        chunkFileNames: 'assets/[name].js',
+        assetFileNames: 'assets/[name].[ext]',
+      },
+    },
+  },
 });

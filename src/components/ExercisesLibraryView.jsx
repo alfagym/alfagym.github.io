@@ -262,18 +262,29 @@ export default function ExercisesLibraryView({
               </div>
             )}
 
-            {selectedExercise.videoUrl && (
+            {(selectedExercise.videoUrl || selectedExercise.thumbnailUrl) && (
               <div className="ex-demo-video-box">
-                <video
-                  key={selectedExercise.videoUrl}
-                  src={selectedExercise.videoUrl}
-                  poster={selectedExercise.thumbnailUrl || undefined}
-                  autoPlay
-                  loop
-                  muted
-                  playsInline
-                  className="ex-demo-video"
-                />
+                {selectedExercise.videoUrl &&
+                selectedExercise.videoUrl.toLowerCase().endsWith('.mp4') ? (
+                  <video
+                    key={selectedExercise.videoUrl}
+                    src={selectedExercise.videoUrl}
+                    poster={selectedExercise.thumbnailUrl || undefined}
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    className="ex-demo-video"
+                  />
+                ) : (
+                  <img
+                    src={
+                      selectedExercise.videoUrl || selectedExercise.thumbnailUrl
+                    }
+                    alt={getExName(selectedExercise)}
+                    className="ex-demo-video"
+                  />
+                )}
               </div>
             )}
 

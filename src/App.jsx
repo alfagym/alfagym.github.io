@@ -31,7 +31,7 @@ import CloudSyncModal from './components/CloudSyncModal';
 import './App.css';
 
 /* global __BUILD_TIMESTAMP__ */
-const FALLBACK_TIMESTAMP = '11:20 PM - 11/06/2026';
+const FALLBACK_TIMESTAMP = '11:26 PM - 11/06/2026';
 const BUILD_TIMESTAMP =
   typeof __BUILD_TIMESTAMP__ !== 'undefined'
     ? __BUILD_TIMESTAMP__
@@ -117,12 +117,13 @@ export default function App() {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const hevyDefaults = DEFAULT_ROUTINES.filter(
-            (dr) =>
-              dr.id.startsWith('routine-hevy-') &&
-              !parsed.some((p) => p.id === dr.id)
+          const hevyDefaults = DEFAULT_ROUTINES.filter((dr) =>
+            dr.id.startsWith('routine-hevy-')
           );
-          return [...hevyDefaults, ...parsed];
+          const nonHevySaved = parsed.filter(
+            (p) => !p.id.startsWith('routine-hevy-')
+          );
+          return [...hevyDefaults, ...nonHevySaved];
         }
       }
     } catch {

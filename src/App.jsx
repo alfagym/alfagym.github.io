@@ -5,7 +5,6 @@ import {
   FolderKanban,
   BarChart3,
   Disc,
-  Cloud,
   Globe,
   LogOut,
   Scale,
@@ -31,7 +30,7 @@ import CloudSyncModal from './components/CloudSyncModal';
 import './App.css';
 
 /* global __BUILD_TIMESTAMP__ */
-const FALLBACK_TIMESTAMP = '11:26 PM - 11/06/2026';
+const FALLBACK_TIMESTAMP = '11:34 PM - 11/06/2026';
 const BUILD_TIMESTAMP =
   typeof __BUILD_TIMESTAMP__ !== 'undefined'
     ? __BUILD_TIMESTAMP__
@@ -52,6 +51,143 @@ const DEFAULT_ACCOUNTS = [
     createdAt: '2026-11-06T22:00:00.000Z',
   },
 ];
+
+function getUserStorageKey(user) {
+  if (!user) return 'raydel';
+  return (user.identifier || user.id || 'raydel')
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '_');
+}
+
+function loadUserRoutines(userKey) {
+  try {
+    const userSaved = localStorage.getItem(`alfa_gym_routines_${userKey}`);
+    if (userSaved) {
+      const parsed = JSON.parse(userSaved);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    }
+    // Initial migration for Raydel if legacy key exists
+    if (userKey === 'raydel') {
+      const legacy = localStorage.getItem('alfa_gym_routines');
+      if (legacy) {
+        const parsedLegacy = JSON.parse(legacy);
+        if (Array.isArray(parsedLegacy) && parsedLegacy.length > 0) {
+          const hevyDefaults = DEFAULT_ROUTINES.filter((dr) =>
+            dr.id.startsWith('routine-hevy-')
+          );
+          const nonHevySaved = parsedLegacy.filter(
+            (p) => !p.id.startsWith('routine-hevy-')
+          );
+          const merged = [
+            ...JSON.parse(JSON.stringify(hevyDefaults)),
+            ...nonHevySaved,
+          ];
+          localStorage.setItem(
+            `alfa_gym_routines_${userKey}`,
+            JSON.stringify(merged)
+          );
+          return merged;
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+  const freshCopy = JSON.parse(JSON.stringify(DEFAULT_ROUTINES));
+  try {
+    localStorage.setItem(
+      `alfa_gym_routines_${userKey}`,
+      JSON.stringify(freshCopy)
+    );
+  } catch {
+    // ignore
+  }
+  return freshCopy;
+}
+
+function loadUserWorkouts(userKey) {
+  try {
+    const userSaved = localStorage.getItem(`alfa_gym_workouts_${userKey}`);
+    if (userSaved) {
+      const parsed = JSON.parse(userSaved);
+      if (Array.isArray(parsed)) return parsed;
+    }
+    if (userKey === 'raydel') {
+      const legacy = localStorage.getItem('alfa_gym_workouts');
+      if (legacy) {
+        const parsedLegacy = JSON.parse(legacy);
+        if (Array.isArray(parsedLegacy)) return parsedLegacy;
+      }
+      return createInitialWorkouts();
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+function loadUserMeasurements(userKey) {
+  try {
+    const userSaved = localStorage.getItem(`alfa_gym_measurements_${userKey}`);
+    if (userSaved) {
+      const parsed = JSON.parse(userSaved);
+      if (Array.isArray(parsed)) return parsed;
+    }
+    if (userKey === 'raydel') {
+      const legacy = localStorage.getItem('alfa_gym_measurements');
+      if (legacy) {
+        const parsedLegacy = JSON.parse(legacy);
+        if (Array.isArray(parsedLegacy)) return parsedLegacy;
+      }
+      return createInitialMeasurements();
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+function loadUserCustomExercises(userKey) {
+  try {
+    const userSaved = localStorage.getItem(
+      `alfa_gym_custom_exercises_${userKey}`
+    );
+    if (userSaved) {
+      const parsed = JSON.parse(userSaved);
+      if (Array.isArray(parsed)) return parsed;
+    }
+    if (userKey === 'raydel') {
+      const legacy = localStorage.getItem('alfa_gym_custom_exercises');
+      if (legacy) {
+        const parsedLegacy = JSON.parse(legacy);
+        if (Array.isArray(parsedLegacy)) return parsedLegacy;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+function loadUserActiveWorkout(userKey) {
+  try {
+    const userSaved = localStorage.getItem(
+      `alfa_gym_active_workout_${userKey}`
+    );
+    if (userSaved) return JSON.parse(userSaved);
+    if (userKey === 'raydel') {
+      const legacy = localStorage.getItem('alfa_gym_active_workout');
+      if (legacy) return JSON.parse(legacy);
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
 
 export default function App() {
   // Language & Weight Unit (Defaults: Spanish + lbs)
@@ -92,69 +228,35 @@ export default function App() {
     }
   });
 
-  // Main Navigation Tab
+  const activeUserKey = useMemo(
+    () => getUserStorageKey(currentUser),
+    [currentUser]
+  );
+
+  // Main Navigation Tab & Quick Routine Edit Target
   const [activeTab, setActiveTab] = useState('workout');
+  const [editingRoutineIdTarget, setEditingRoutineIdTarget] = useState(null);
   const [showCloudModal, setShowCloudModal] = useState(false);
 
-  // Workouts History
-  const [workouts, setWorkouts] = useState(() => {
-    try {
-      const saved = localStorage.getItem('alfa_gym_workouts');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    } catch {
-      // ignore
-    }
-    return createInitialWorkouts();
-  });
+  // Per-User Workouts History
+  const [workouts, setWorkouts] = useState(() =>
+    loadUserWorkouts(getUserStorageKey(currentUser))
+  );
 
-  // Routines
-  const [routines, setRoutines] = useState(() => {
-    try {
-      const saved = localStorage.getItem('alfa_gym_routines');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const hevyDefaults = DEFAULT_ROUTINES.filter((dr) =>
-            dr.id.startsWith('routine-hevy-')
-          );
-          const nonHevySaved = parsed.filter(
-            (p) => !p.id.startsWith('routine-hevy-')
-          );
-          return [...hevyDefaults, ...nonHevySaved];
-        }
-      }
-    } catch {
-      // ignore
-    }
-    return DEFAULT_ROUTINES;
-  });
+  // Per-User Routines (100% editable per user)
+  const [routines, setRoutines] = useState(() =>
+    loadUserRoutines(getUserStorageKey(currentUser))
+  );
 
-  // Custom Exercises
-  const [customExercises, setCustomExercises] = useState(() => {
-    try {
-      const saved = localStorage.getItem('alfa_gym_custom_exercises');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
+  // Per-User Custom Exercises
+  const [customExercises, setCustomExercises] = useState(() =>
+    loadUserCustomExercises(getUserStorageKey(currentUser))
+  );
 
-  // Body Measurements
-  const [measurements, setMeasurements] = useState(() => {
-    try {
-      const saved = localStorage.getItem('alfa_gym_measurements');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    } catch {
-      // ignore
-    }
-    return createInitialMeasurements();
-  });
+  // Per-User Body Measurements
+  const [measurements, setMeasurements] = useState(() =>
+    loadUserMeasurements(getUserStorageKey(currentUser))
+  );
 
   // Cloud Sync Config
   const [cloudConfig, setCloudConfig] = useState(() => {
@@ -168,15 +270,10 @@ export default function App() {
     }
   });
 
-  // Active Live Workout State
-  const [activeWorkout, setActiveWorkout] = useState(() => {
-    try {
-      const saved = localStorage.getItem('alfa_gym_active_workout');
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  });
+  // Per-User Active Live Workout State
+  const [activeWorkout, setActiveWorkout] = useState(() =>
+    loadUserActiveWorkout(getUserStorageKey(currentUser))
+  );
 
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
@@ -188,7 +285,23 @@ export default function App() {
     exerciseName: '',
   });
 
-  // Persist to LocalStorage
+  // Switch / Load user data cleanly on login or register
+  const handleSelectActiveUser = (userObj) => {
+    setCurrentUser(userObj);
+    if (userObj) {
+      const uKey = getUserStorageKey(userObj);
+      setRoutines(loadUserRoutines(uKey));
+      setWorkouts(loadUserWorkouts(uKey));
+      setMeasurements(loadUserMeasurements(uKey));
+      setCustomExercises(loadUserCustomExercises(uKey));
+      setActiveWorkout(loadUserActiveWorkout(uKey));
+      if (userObj.preferredUnit) {
+        setUnit(userObj.preferredUnit);
+      }
+    }
+  };
+
+  // Persist Global Settings & Per-User Data to LocalStorage
   useEffect(() => {
     localStorage.setItem('alfa_gym_lang', lang);
   }, [lang]);
@@ -203,45 +316,62 @@ export default function App() {
 
   useEffect(() => {
     if (currentUser) {
-      localStorage.setItem('alfa_gym_current_user', JSON.stringify(currentUser));
+      localStorage.setItem(
+        'alfa_gym_current_user',
+        JSON.stringify(currentUser)
+      );
     } else {
       localStorage.removeItem('alfa_gym_current_user');
     }
   }, [currentUser]);
 
   useEffect(() => {
-    localStorage.setItem('alfa_gym_workouts', JSON.stringify(workouts));
-  }, [workouts]);
-
-  useEffect(() => {
-    localStorage.setItem('alfa_gym_routines', JSON.stringify(routines));
-  }, [routines]);
-
-  useEffect(() => {
+    if (!currentUser) return;
     localStorage.setItem(
-      'alfa_gym_custom_exercises',
+      `alfa_gym_workouts_${activeUserKey}`,
+      JSON.stringify(workouts)
+    );
+  }, [workouts, activeUserKey, currentUser]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    localStorage.setItem(
+      `alfa_gym_routines_${activeUserKey}`,
+      JSON.stringify(routines)
+    );
+  }, [routines, activeUserKey, currentUser]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    localStorage.setItem(
+      `alfa_gym_custom_exercises_${activeUserKey}`,
       JSON.stringify(customExercises)
     );
-  }, [customExercises]);
+  }, [customExercises, activeUserKey, currentUser]);
 
   useEffect(() => {
-    localStorage.setItem('alfa_gym_measurements', JSON.stringify(measurements));
-  }, [measurements]);
+    if (!currentUser) return;
+    localStorage.setItem(
+      `alfa_gym_measurements_${activeUserKey}`,
+      JSON.stringify(measurements)
+    );
+  }, [measurements, activeUserKey, currentUser]);
 
   useEffect(() => {
     localStorage.setItem('alfa_gym_cloud_config', JSON.stringify(cloudConfig));
   }, [cloudConfig]);
 
   useEffect(() => {
+    if (!currentUser) return;
     if (activeWorkout) {
       localStorage.setItem(
-        'alfa_gym_active_workout',
+        `alfa_gym_active_workout_${activeUserKey}`,
         JSON.stringify(activeWorkout)
       );
     } else {
-      localStorage.removeItem('alfa_gym_active_workout');
+      localStorage.removeItem(`alfa_gym_active_workout_${activeUserKey}`);
     }
-  }, [activeWorkout]);
+  }, [activeWorkout, activeUserKey, currentUser]);
 
   // Live Workout Stopwatch Ticker
   useEffect(() => {
@@ -251,7 +381,9 @@ export default function App() {
     }
     const startedAt = activeWorkout.startedAt || Date.now();
     const updateClock = () => {
-      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
+      setElapsedSeconds(
+        Math.max(0, Math.floor((Date.now() - startedAt) / 1000))
+      );
     };
     updateClock();
     const interval = setInterval(updateClock, 1000);
@@ -320,9 +452,7 @@ export default function App() {
     setActiveWorkout({
       id: `live-${Date.now()}`,
       name:
-        lang === 'es'
-          ? 'Entrenamiento Alfa Gym'
-          : 'Alfa Gym Session',
+        lang === 'es' ? 'Entrenamiento Alfa Gym' : 'Alfa Gym Session',
       startedAt: Date.now(),
       notes: '',
       exercises: [],
@@ -339,7 +469,7 @@ export default function App() {
       notes: routine.notes || '',
       exercises: (routine.exercises || []).map((ex) => ({
         exerciseId: ex.exerciseId,
-        restSeconds: ex.restSeconds || 90,
+        restSeconds: ex.restSeconds || 45,
         supersetGroup: null,
         note: ex.note || '',
         sets: (ex.sets || []).map((s, idx) => ({
@@ -356,9 +486,98 @@ export default function App() {
     setActiveTab('workout');
   };
 
+  const handleEditRoutineFromHub = (routineId) => {
+    setEditingRoutineIdTarget(routineId);
+    setActiveTab('routines');
+  };
+
+  // Save current live workout exercises/weights/sets back into the user's routine
+  const handleSaveActiveToRoutine = (workoutSnapshot) => {
+    if (!workoutSnapshot) return;
+    const mappedExercises = (workoutSnapshot.exercises || []).map((ex) => ({
+      exerciseId: ex.exerciseId,
+      restSeconds: Number(ex.restSeconds) || 45,
+      note: ex.note || '',
+      sets: (ex.sets || []).map((s) => ({
+        type: s.type || 'normal',
+        weight: Number(s.weight) || 0,
+        reps: Number(s.reps) || 0,
+        rpe: Number(s.rpe) || 8,
+      })),
+    }));
+
+    if (workoutSnapshot.routineId) {
+      setRoutines((prev) =>
+        prev.map((rt) =>
+          rt.id === workoutSnapshot.routineId
+            ? {
+                ...rt,
+                name: workoutSnapshot.name || rt.name,
+                exercises: mappedExercises,
+              }
+            : rt
+        )
+      );
+    } else {
+      const newRtId = `rt-${Date.now()}`;
+      const newRoutine = {
+        id: newRtId,
+        name:
+          workoutSnapshot.name ||
+          (lang === 'es' ? 'Mi Rutina Personalizada' : 'My Custom Routine'),
+        folder: 'custom',
+        notes: workoutSnapshot.notes || '',
+        exercises: mappedExercises,
+      };
+      setRoutines((prev) => [newRoutine, ...prev]);
+      setActiveWorkout((prev) =>
+        prev ? { ...prev, routineId: newRtId } : prev
+      );
+    }
+  };
+
+  const handleResetDefaultRoutines = () => {
+    const confirmMsg =
+      lang === 'es'
+        ? '¿Deseas restaurar las plantillas base en tu cuenta? (Tus rutinas actuales volverán a los valores predeterminados).'
+        : 'Restore default routine templates for your account?';
+    if (window.confirm(confirmMsg)) {
+      setRoutines(JSON.parse(JSON.stringify(DEFAULT_ROUTINES)));
+    }
+  };
+
   const handleFinishWorkout = async (completedRecord) => {
     const updatedWorkouts = [completedRecord, ...workouts];
     setWorkouts(updatedWorkouts);
+
+    // Automatically update the user's routine with any new weights/reps/sets from today's session
+    let updatedRoutines = routines;
+    if (
+      completedRecord.routineId &&
+      Array.isArray(completedRecord.exercises) &&
+      completedRecord.exercises.length > 0
+    ) {
+      updatedRoutines = routines.map((rt) => {
+        if (rt.id !== completedRecord.routineId) return rt;
+        return {
+          ...rt,
+          name: completedRecord.name || rt.name,
+          exercises: completedRecord.exercises.map((ex) => ({
+            exerciseId: ex.exerciseId,
+            restSeconds: Number(ex.restSeconds) || 45,
+            note: ex.note || '',
+            sets: (ex.sets || []).map((s) => ({
+              type: s.type || 'normal',
+              weight: Number(s.weight) || 0,
+              reps: Number(s.reps) || 0,
+              rpe: Number(s.rpe) || 8,
+            })),
+          })),
+        };
+      });
+      setRoutines(updatedRoutines);
+    }
+
     setActiveWorkout(null);
     skipRestTimer();
 
@@ -370,7 +589,7 @@ export default function App() {
           gistId: cloudConfig.gistId,
           payload: {
             workouts: updatedWorkouts,
-            routines,
+            routines: updatedRoutines,
             customExercises,
             measurements,
             accounts,
@@ -412,10 +631,10 @@ export default function App() {
         setUnit={setUnit}
         t={t}
         accounts={accounts}
-        onLoginSuccess={(acc) => setCurrentUser(acc)}
+        onLoginSuccess={(acc) => handleSelectActiveUser(acc)}
         onRegisterAccount={(newAcc) => {
           setAccounts((prev) => [...prev, newAcc]);
-          setCurrentUser(newAcc);
+          handleSelectActiveUser(newAcc);
         }}
         buildTimestamp={BUILD_TIMESTAMP}
       />
@@ -437,7 +656,8 @@ export default function App() {
           <div>
             <h1 className="alfa-header-title">{t.appName}</h1>
             <span className="alfa-header-sub">
-              {currentUser.name} • <Flame size={11} className="inline-icon text-amber" />{' '}
+              {currentUser.name} •{' '}
+              <Flame size={11} className="inline-icon text-amber" />{' '}
               {workouts.length} {t.analytics.totalWorkouts}
             </span>
           </div>
@@ -492,7 +712,7 @@ export default function App() {
           </button>
         </nav>
 
-        {/* Right Controls: Unit Toggle, Language Toggle, Cloud Sync & Logout */}
+        {/* Right Controls: Unit Toggle, Language Toggle & Logout */}
         <div className="alfa-header-actions">
           <button
             type="button"
@@ -569,6 +789,8 @@ export default function App() {
             workouts={workouts}
             onStartEmptyWorkout={handleStartEmptyWorkout}
             onStartRoutineWorkout={handleStartRoutineWorkout}
+            onEditRoutineFromHub={handleEditRoutineFromHub}
+            onSaveActiveToRoutine={handleSaveActiveToRoutine}
             onFinishWorkout={handleFinishWorkout}
             onCancelWorkout={handleCancelWorkout}
             onNavigateTab={setActiveTab}
@@ -583,7 +805,11 @@ export default function App() {
             routines={routines}
             setRoutines={setRoutines}
             exercisesLibrary={fullExercisesLibrary}
+            onAddCustomExercise={handleAddCustomExercise}
             onStartRoutineWorkout={handleStartRoutineWorkout}
+            initialEditingRoutineId={editingRoutineIdTarget}
+            onClearInitialEditingRoutine={() => setEditingRoutineIdTarget(null)}
+            onResetDefaultRoutines={handleResetDefaultRoutines}
           />
         )}
 

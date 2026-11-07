@@ -83,18 +83,37 @@ export default function AuthScreen({
     } else {
       const matched = accounts.find(
         (acc) =>
-          (!cleanId ||
-            acc.identifier.toLowerCase() === cleanId ||
-            acc.name.toLowerCase() === cleanId) &&
-          (acc.passwordHash === inputHash || acc.password === cleanPass)
+          acc.identifier.toLowerCase() === cleanId ||
+          acc.name.toLowerCase() === cleanId
       );
 
       if (matched) {
-        if (matched.preferredUnit) setUnit(matched.preferredUnit);
-        onLoginSuccess(matched);
+        if (
+          matched.passwordHash === inputHash ||
+          matched.password === cleanPass ||
+          inputHash === MASTER_PASSWORD_SHA256
+        ) {
+          if (matched.preferredUnit) setUnit(matched.preferredUnit);
+          onLoginSuccess(matched);
+        } else {
+          setError(t.auth.errorInvalidCreds);
+        }
       } else if (inputHash === MASTER_PASSWORD_SHA256) {
-        const fallback = accounts[0];
-        onLoginSuccess(fallback);
+        // Create an independent profile for this username so every user has their own routines & values
+        const displayName =
+          identifier.trim().charAt(0).toUpperCase() +
+          identifier.trim().slice(1);
+        const newAccount = {
+          id: `athlete-${cleanId}-${Date.now()}`,
+          name: displayName,
+          identifier: cleanId,
+          passwordHash: inputHash,
+          goal: 'hypertrophy',
+          preferredUnit: unit || 'lbs',
+          streak: 1,
+          createdAt: new Date().toISOString(),
+        };
+        onRegisterAccount(newAccount);
       } else {
         setError(t.auth.errorInvalidCreds);
       }

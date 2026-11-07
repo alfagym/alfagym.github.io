@@ -18,6 +18,8 @@ import {
   Sparkles,
   ChevronRight,
   FolderKanban,
+  Edit3,
+  Save,
 } from 'lucide-react';
 import {
   calculate1RM,
@@ -51,10 +53,13 @@ export default function LiveWorkoutLogger({
   workouts,
   onStartEmptyWorkout,
   onStartRoutineWorkout,
+  onEditRoutineFromHub,
+  onSaveActiveToRoutine,
   onFinishWorkout,
   onCancelWorkout,
   onNavigateTab,
 }) {
+  const [routineSavedToast, setRoutineSavedToast] = useState(false);
   const [showAddExerciseModal, setShowAddExerciseModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [muscleFilter, setMuscleFilter] = useState('all');
@@ -549,14 +554,26 @@ export default function LiveWorkoutLogger({
                       );
                     })}
                   </div>
-                  <button
-                    type="button"
-                    className="routine-launch-btn"
-                    onClick={() => onStartRoutineWorkout(rt)}
-                  >
-                    <Play size={15} fill="currentColor" />
-                    <span>{t.routines.startRoutineBtn}</span>
-                  </button>
+                  <div className="hub-routine-actions-row">
+                    {onEditRoutineFromHub && (
+                      <button
+                        type="button"
+                        className="routine-edit-pill-btn"
+                        onClick={() => onEditRoutineFromHub(rt.id)}
+                      >
+                        <Edit3 size={14} />
+                        <span>{t.routines.editBtn}</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="routine-launch-btn"
+                      onClick={() => onStartRoutineWorkout(rt)}
+                    >
+                      <Play size={15} fill="currentColor" />
+                      <span>{t.routines.startRoutineBtn}</span>
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -704,6 +721,34 @@ export default function LiveWorkoutLogger({
         </div>
 
         <div className="live-header-actions">
+          {onSaveActiveToRoutine && (
+            <button
+              type="button"
+              className="save-routine-live-btn"
+              onClick={() => {
+                onSaveActiveToRoutine(activeWorkout);
+                setRoutineSavedToast(true);
+                setTimeout(() => setRoutineSavedToast(false), 2400);
+              }}
+              title={
+                lang === 'es'
+                  ? 'Guardar estos pesos, series y ejercicios en tu rutina personal'
+                  : 'Save these weights, sets, and exercises into your personal routine'
+              }
+            >
+              <Save size={15} />
+              <span>
+                {routineSavedToast
+                  ? lang === 'es'
+                    ? '¡Rutina Guardada!'
+                    : 'Routine Saved!'
+                  : lang === 'es'
+                  ? 'Guardar Rutina'
+                  : 'Save Routine'}
+              </span>
+            </button>
+          )}
+
           <button
             type="button"
             className="discard-workout-btn"

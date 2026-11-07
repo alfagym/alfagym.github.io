@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   FolderKanban,
   Play,
@@ -10,8 +10,44 @@ import {
   Check,
   Search,
   Dumbbell,
+  ArrowUp,
+  ArrowDown,
+  Timer,
+  FileText,
+  RotateCcw,
+  Sparkles,
 } from 'lucide-react';
 import { formatWeightValue, toLbs } from '../utils/workoutMath';
+
+const SET_TYPE_ORDER = ['normal', 'warmup', 'dropset', 'failure'];
+
+const MUSCLE_KEYS = [
+  'all',
+  'chest',
+  'back',
+  'shoulders',
+  'quads',
+  'hamstrings',
+  'glutes',
+  'biceps',
+  'triceps',
+  'forearms',
+  'abs',
+  'traps',
+  'calves',
+  'cardio',
+];
+
+const EQUIP_KEYS = [
+  'barbell',
+  'dumbbell',
+  'machine',
+  'cable',
+  'smith',
+  'bodyweight',
+  'kettlebell',
+  'ezbar',
+];
 
 export default function RoutinesView({
   lang,
@@ -20,11 +56,22 @@ export default function RoutinesView({
   routines,
   setRoutines,
   exercisesLibrary,
+  onAddCustomExercise,
   onStartRoutineWorkout,
+  initialEditingRoutineId,
+  onClearInitialEditingRoutine,
+  onResetDefaultRoutines,
 }) {
   const [selectedFolder, setSelectedFolder] = useState('all');
   const [editingRoutine, setEditingRoutine] = useState(null);
   const [exSearch, setExSearch] = useState('');
+  const [pickerMuscle, setPickerMuscle] = useState('all');
+
+  // Custom exercise creator inside routine modal
+  const [showCustomCreator, setShowCustomCreator] = useState(false);
+  const [customExName, setCustomExName] = useState('');
+  const [customExMuscle, setCustomExMuscle] = useState('chest');
+  const [customExEquip, setCustomExEquip] = useState('machine');
 
   const exerciseMap = useMemo(() => {
     const m = {};
@@ -33,16 +80,29 @@ export default function RoutinesView({
   }, [exercisesLibrary]);
 
   const getExName = (ex) => {
-    if (!ex) return 'Ejercicio';
+    if (!ex) return lang === 'es' ? 'Ejercicio' : 'Exercise';
     return lang === 'es' ? ex.nameEs || ex.nameEn : ex.nameEn || ex.nameEs;
   };
 
+  // Open routine editor automatically if triggered from Home Hub
+  useEffect(() => {
+    if (initialEditingRoutineId) {
+      const target = routines.find((r) => r.id === initialEditingRoutineId);
+      if (target) {
+        setEditingRoutine(JSON.parse(JSON.stringify(target)));
+      }
+      if (onClearInitialEditingRoutine) {
+        onClearInitialEditingRoutine();
+      }
+    }
+  }, [initialEditingRoutineId, routines, onClearInitialEditingRoutine]);
+
   const folders = [
     { id: 'all', label: t.routines.folderAll },
+    { id: 'custom', label: t.routines.folderCustom },
     { id: 'ppl', label: t.routines.folderPPL },
     { id: 'upperlower', label: t.routines.folderUpperLower },
     { id: 'fullbody', label: t.routines.folderFullBody },
-    { id: 'custom', label: t.routines.folderCustom },
   ];
 
   const filteredRoutines = useMemo(() => {
@@ -51,6 +111,7 @@ export default function RoutinesView({
   }, [routines, selectedFolder]);
 
   const handleOpenNewRoutine = () => {
+    const firstExId = exercisesLibrary[0]?.id || 'bench-press-barbell';
     setEditingRoutine({
       id: null,
       name: '',
@@ -58,13 +119,13 @@ export default function RoutinesView({
       notes: '',
       exercises: [
         {
-          exerciseId: 'bench-press-barbell',
-          restSeconds: 120,
+          exerciseId: firstExId,
+          restSeconds: 60,
           note: '',
           sets: [
-            { type: 'normal', weight: 135, reps: 10, rpe: 8 },
-            { type: 'normal', weight: 155, reps: 8, rpe: 8.5 },
-            { type: 'normal', weight: 155, reps: 8, rpe: 9 },
+            { type: 'normal', weight: 100, reps: 8, rpe: 8 },
+            { type: 'normal', weight: 100, reps: 8, rpe: 8.5 },
+            { type: 'normal', weight: 100, reps: 8, rpe: 9 },
           ],
         },
       ],
@@ -73,61 +134,211 @@ export default function RoutinesView({
 
   const handleDuplicateRoutine = (rt) => {
     const copy = {
-      ...rt,
+      ...JSON.parse(JSON.stringify(rt)),
       id: `rt-${Date.now()}`,
-      name: `${rt.name} (Copia)`,
+      name: `${rt.name} (${lang === 'es' ? 'Copia' : 'Copy'})`,
       folder: 'custom',
     };
     setRoutines((prev) => [copy, ...prev]);
   };
 
-  const handleDeleteRoutine = (rtId) => {
-    setRoutines((prev) => prev.filter((r) => r.id !== rtId));
+  const handleDeleteRoutine = (rt) => {
+    const msg =
+      lang === 'es'
+        ? `¿Eliminar la rutina "${rt.name}" de tu perfil?`
+        : `Delete routine "${rt.name}" from your profile?`;
+    if (window.confirm(msg)) {
+      setRoutines((prev) => prev.filter((r) => r.id !== rt.id));
+    }
+  };
+
+  const handleMoveRoutineCard = (rtId, direction) => {
+    setRoutines((prev) => {
+      const idx = prev.findIndex((r) => r.id === rtId);
+      if (idx === -1) return prev;
+      const targetIdx = idx + direction;
+      if (targetIdx < 0 || targetIdx >= prev.length) return prev;
+      const next = [...prev];
+      const [item] = next.splice(idx, 1);
+      next.splice(targetIdx, 0, item);
+      return next;
+    });
   };
 
   const handleSaveRoutine = (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     if (!editingRoutine) return;
     const cleanName =
       editingRoutine.name.trim() ||
-      (lang === 'es' ? 'Nueva Rutina Alfa' : 'New Alfa Routine');
+      (lang === 'es' ? 'Mi Rutina Personalizada' : 'My Custom Routine');
+
+    const normalizedExercises = (editingRoutine.exercises || []).map((ex) => ({
+      ...ex,
+      restSeconds: Math.max(0, Number(ex.restSeconds) || 45),
+      note: ex.note || '',
+      sets: (ex.sets || []).map((s) => ({
+        type: s.type || 'normal',
+        weight: s.weight === '' ? 0 : Number(s.weight) || 0,
+        reps: s.reps === '' ? 0 : Number(s.reps) || 0,
+        rpe: Number(s.rpe) || 8,
+      })),
+    }));
+
+    const finalRoutine = {
+      ...editingRoutine,
+      name: cleanName,
+      exercises: normalizedExercises,
+    };
 
     if (editingRoutine.id) {
       setRoutines((prev) =>
-        prev.map((r) =>
-          r.id === editingRoutine.id
-            ? { ...editingRoutine, name: cleanName }
-            : r
-        )
+        prev.map((r) => (r.id === editingRoutine.id ? finalRoutine : r))
       );
     } else {
       const created = {
-        ...editingRoutine,
+        ...finalRoutine,
         id: `rt-${Date.now()}`,
-        name: cleanName,
       };
       setRoutines((prev) => [created, ...prev]);
     }
     setEditingRoutine(null);
   };
 
+  // Exercise-level helpers inside the Routine Editor
   const handleAddExToRoutineDraft = (exId) => {
+    const exObj = exerciseMap[exId];
     setEditingRoutine((prev) => ({
       ...prev,
       exercises: [
         ...(prev.exercises || []),
         {
           exerciseId: exId,
-          restSeconds: 90,
+          restSeconds: exObj?.defaultRestSeconds || 45,
           note: '',
           sets: [
-            { type: 'normal', weight: 95, reps: 10, rpe: 8 },
-            { type: 'normal', weight: 95, reps: 10, rpe: 8.5 },
-            { type: 'normal', weight: 95, reps: 10, rpe: 9 },
+            {
+              type: 'normal',
+              weight: exObj?.equipment === 'bodyweight' ? 0 : 95,
+              reps: 8,
+              rpe: 8,
+            },
+            {
+              type: 'normal',
+              weight: exObj?.equipment === 'bodyweight' ? 0 : 95,
+              reps: 8,
+              rpe: 8.5,
+            },
+            {
+              type: 'normal',
+              weight: exObj?.equipment === 'bodyweight' ? 0 : 95,
+              reps: 8,
+              rpe: 9,
+            },
           ],
         },
       ],
     }));
+  };
+
+  const handleMoveDraftExercise = (exIdx, direction) => {
+    setEditingRoutine((prev) => {
+      const list = [...(prev.exercises || [])];
+      const targetIdx = exIdx + direction;
+      if (targetIdx < 0 || targetIdx >= list.length) return prev;
+      const [moved] = list.splice(exIdx, 1);
+      list.splice(targetIdx, 0, moved);
+      return { ...prev, exercises: list };
+    });
+  };
+
+  const handleChangeDraftExerciseId = (exIdx, newExerciseId) => {
+    setEditingRoutine((prev) => {
+      const nextExs = [...(prev.exercises || [])];
+      nextExs[exIdx] = {
+        ...nextExs[exIdx],
+        exerciseId: newExerciseId,
+      };
+      return { ...prev, exercises: nextExs };
+    });
+  };
+
+  const handleUpdateDraftExField = (exIdx, field, value) => {
+    setEditingRoutine((prev) => {
+      const nextExs = [...(prev.exercises || [])];
+      nextExs[exIdx] = {
+        ...nextExs[exIdx],
+        [field]: value,
+      };
+      return { ...prev, exercises: nextExs };
+    });
+  };
+
+  const handleCycleDraftSetType = (exIdx, sIdx) => {
+    setEditingRoutine((prev) => {
+      const nextExs = [...(prev.exercises || [])];
+      const nextSets = [...(nextExs[exIdx].sets || [])];
+      const cur = nextSets[sIdx].type || 'normal';
+      const nextType =
+        SET_TYPE_ORDER[(SET_TYPE_ORDER.indexOf(cur) + 1) % SET_TYPE_ORDER.length];
+      nextSets[sIdx] = { ...nextSets[sIdx], type: nextType };
+      nextExs[exIdx] = { ...nextExs[exIdx], sets: nextSets };
+      return { ...prev, exercises: nextExs };
+    });
+  };
+
+  const handleRemoveDraftSet = (exIdx, sIdx) => {
+    setEditingRoutine((prev) => {
+      const nextExs = [...(prev.exercises || [])];
+      const nextSets = (nextExs[exIdx].sets || []).filter((_, i) => i !== sIdx);
+      if (nextSets.length === 0) {
+        nextExs.splice(exIdx, 1);
+      } else {
+        nextExs[exIdx] = { ...nextExs[exIdx], sets: nextSets };
+      }
+      return { ...prev, exercises: nextExs };
+    });
+  };
+
+  const handleEqualizeSets = (exIdx) => {
+    setEditingRoutine((prev) => {
+      const nextExs = [...(prev.exercises || [])];
+      const sets = nextExs[exIdx].sets || [];
+      if (sets.length < 2) return prev;
+      const first = sets[0];
+      nextExs[exIdx] = {
+        ...nextExs[exIdx],
+        sets: sets.map((s) => ({
+          ...s,
+          weight: first.weight,
+          reps: first.reps,
+        })),
+      };
+      return { ...prev, exercises: nextExs };
+    });
+  };
+
+  const handleCreateCustomExInModal = () => {
+    if (!customExName.trim() || !onAddCustomExercise) return;
+    const created = onAddCustomExercise({
+      nameEs: customExName.trim(),
+      nameEn: customExName.trim(),
+      primaryMuscle: customExMuscle,
+      secondaryMuscles: [],
+      equipment: customExEquip,
+      defaultRestSeconds: 45,
+    });
+    setCustomExName('');
+    setShowCustomCreator(false);
+    if (created?.id) {
+      handleAddExToRoutineDraft(created.id);
+    }
+  };
+
+  const renderSetBadgeLabel = (setObj, idx) => {
+    if (setObj.type === 'warmup') return 'W';
+    if (setObj.type === 'dropset') return 'D';
+    if (setObj.type === 'failure') return 'F';
+    return idx + 1;
   };
 
   return (
@@ -138,17 +349,40 @@ export default function RoutinesView({
           <h2>
             <FolderKanban size={22} className="text-blue" /> {t.routines.title}
           </h2>
-          <p className="section-subtitle">{t.routines.subtitle}</p>
+          <p className="section-subtitle">
+            {lang === 'es'
+              ? 'Personaliza al 100% tus rutinas, pesos, repeticiones, notas de máquinas y descansos para tu usuario.'
+              : 'Fully customize your personal routines, target weights, reps, machine notes, and rest timers.'}
+          </p>
         </div>
 
-        <button
-          type="button"
-          className="primary-btn"
-          onClick={handleOpenNewRoutine}
-        >
-          <Plus size={18} />
-          <span>{t.routines.newRoutineBtn}</span>
-        </button>
+        <div className="header-btn-group">
+          {onResetDefaultRoutines && (
+            <button
+              type="button"
+              className="secondary-btn"
+              onClick={onResetDefaultRoutines}
+              title={
+                lang === 'es'
+                  ? 'Restaurar plantillas originales si borraste alguna'
+                  : 'Restore default routine templates'
+              }
+            >
+              <RotateCcw size={15} />
+              <span>
+                {lang === 'es' ? 'Restaurar Base' : 'Restore Defaults'}
+              </span>
+            </button>
+          )}
+          <button
+            type="button"
+            className="primary-btn"
+            onClick={handleOpenNewRoutine}
+          >
+            <Plus size={18} />
+            <span>{t.routines.newRoutineBtn}</span>
+          </button>
+        </div>
       </div>
 
       {/* Folder Tabs */}
@@ -167,7 +401,7 @@ export default function RoutinesView({
 
       {/* Routines Grid */}
       <div className="routines-cards-grid">
-        {filteredRoutines.map((rt) => {
+        {filteredRoutines.map((rt, rtIdx) => {
           const totalSets = (rt.exercises || []).reduce(
             (acc, e) => acc + (e.sets?.length || 0),
             0
@@ -183,6 +417,24 @@ export default function RoutinesView({
                   <h3>{rt.name}</h3>
                 </div>
                 <div className="routine-icon-actions">
+                  <button
+                    type="button"
+                    className="icon-btn-subtle"
+                    onClick={() => handleMoveRoutineCard(rt.id, -1)}
+                    disabled={rtIdx === 0}
+                    title={lang === 'es' ? 'Mover arriba' : 'Move up'}
+                  >
+                    <ArrowUp size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-btn-subtle"
+                    onClick={() => handleMoveRoutineCard(rt.id, 1)}
+                    disabled={rtIdx === filteredRoutines.length - 1}
+                    title={lang === 'es' ? 'Mover abajo' : 'Move down'}
+                  >
+                    <ArrowDown size={14} />
+                  </button>
                   <button
                     type="button"
                     className="icon-btn-subtle"
@@ -204,7 +456,7 @@ export default function RoutinesView({
                   <button
                     type="button"
                     className="icon-btn-subtle danger"
-                    onClick={() => handleDeleteRoutine(rt.id)}
+                    onClick={() => handleDeleteRoutine(rt)}
                     title={t.routines.deleteBtn}
                   >
                     <Trash2 size={15} />
@@ -220,17 +472,26 @@ export default function RoutinesView({
                   const topSet = exItem.sets?.[exItem.sets.length - 1];
                   return (
                     <div key={idx} className="routine-ex-line">
-                      <span className="routine-ex-name">
-                        {exObj?.thumbnailUrl && (
-                          <img
-                            src={exObj.thumbnailUrl}
-                            alt=""
-                            className="routine-line-thumb"
-                          />
+                      <div className="routine-ex-line-left">
+                        <span className="routine-ex-name">
+                          {exObj?.thumbnailUrl && (
+                            <img
+                              src={exObj.thumbnailUrl}
+                              alt=""
+                              className="routine-line-thumb"
+                            />
+                          )}
+                          <span>
+                            <strong>{exItem.sets?.length || 3}×</strong>{' '}
+                            {getExName(exObj)}
+                          </span>
+                        </span>
+                        {exItem.note && (
+                          <span className="routine-ex-inline-note">
+                            📌 {exItem.note}
+                          </span>
                         )}
-                        <strong>{exItem.sets?.length || 3}×</strong>{' '}
-                        {getExName(exObj)}
-                      </span>
+                      </div>
                       {topSet && (
                         <span className="routine-ex-target">
                           {formatWeightValue(topSet.weight, unit)} {unit} ×{' '}
@@ -249,36 +510,58 @@ export default function RoutinesView({
                   {t.routines.setsCount}
                 </span>
 
-                <button
-                  type="button"
-                  className="routine-launch-btn"
-                  onClick={() => onStartRoutineWorkout(rt)}
-                >
-                  <Play size={15} fill="currentColor" />
-                  <span>{t.routines.startRoutineBtn}</span>
-                </button>
+                <div className="routine-card-cta-row">
+                  <button
+                    type="button"
+                    className="routine-edit-pill-btn"
+                    onClick={() =>
+                      setEditingRoutine(JSON.parse(JSON.stringify(rt)))
+                    }
+                  >
+                    <Edit3 size={14} />
+                    <span>{t.routines.editBtn}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className="routine-launch-btn"
+                    onClick={() => onStartRoutineWorkout(rt)}
+                  >
+                    <Play size={15} fill="currentColor" />
+                    <span>{t.routines.startRoutineBtn}</span>
+                  </button>
+                </div>
               </div>
             </div>
           );
         })}
       </div>
 
-      {/* Routine Builder / Editor Modal */}
+      {/* Routine Builder / Full Customizer Modal */}
       {editingRoutine && (
         <div
           className="modal-backdrop"
           onClick={() => setEditingRoutine(null)}
         >
           <div
-            className="modal-panel modal-large"
+            className="modal-panel modal-large routine-customizer-modal"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="modal-header">
-              <h3>
-                {editingRoutine.id
-                  ? t.routines.modalEditTitle
-                  : t.routines.modalCreateTitle}
-              </h3>
+              <div>
+                <h3>
+                  {editingRoutine.id
+                    ? `${t.routines.modalEditTitle}: ${editingRoutine.name}`
+                    : t.routines.modalCreateTitle}
+                </h3>
+                <p className="modal-sub-hint">
+                  {lang === 'es'
+                    ? 'Edita ejercicios, orden, series, pesos en ' +
+                      unit.toUpperCase() +
+                      ', repeticiones, descansos y notas.'
+                    : 'Edit exercises, order, sets, target weights, reps, rest timers, and notes.'}
+                </p>
+              </div>
               <button
                 type="button"
                 className="modal-close-btn"
@@ -301,7 +584,7 @@ export default function RoutinesView({
                         name: e.target.value,
                       })
                     }
-                    placeholder="Ej. Push B — Hipertrofia Pecho"
+                    placeholder="Ej. 2 Chest + Shoulders + Triceps"
                     required
                   />
                 </div>
@@ -316,12 +599,12 @@ export default function RoutinesView({
                       })
                     }
                   >
+                    <option value="custom">{t.routines.folderCustom}</option>
                     <option value="ppl">{t.routines.folderPPL}</option>
                     <option value="upperlower">
                       {t.routines.folderUpperLower}
                     </option>
                     <option value="fullbody">{t.routines.folderFullBody}</option>
-                    <option value="custom">{t.routines.folderCustom}</option>
                   </select>
                 </div>
               </div>
@@ -337,7 +620,11 @@ export default function RoutinesView({
                       notes: e.target.value,
                     })
                   }
-                  placeholder="Notas del programa..."
+                  placeholder={
+                    lang === 'es'
+                      ? 'Descripción o notas generales de tu rutina...'
+                      : 'General routine description or notes...'
+                  }
                 />
               </div>
 
@@ -347,40 +634,169 @@ export default function RoutinesView({
                   const exObj = exerciseMap[exItem.exerciseId];
                   return (
                     <div key={exIdx} className="routine-draft-ex-box">
+                      {/* Exercise Top Row: Thumbnail, Exercise Selector, Order Up/Down, Delete */}
                       <div className="draft-ex-header">
-                        <strong>
-                          {exIdx + 1}. {getExName(exObj)}
-                        </strong>
-                        <button
-                          type="button"
-                          className="icon-btn-subtle danger"
-                          onClick={() => {
-                            const next = editingRoutine.exercises.filter(
-                              (_, i) => i !== exIdx
-                            );
-                            setEditingRoutine({
-                              ...editingRoutine,
-                              exercises: next,
-                            });
-                          }}
-                        >
-                          <Trash2 size={14} />
-                        </button>
+                        <div className="draft-ex-title-wrap">
+                          <span className="draft-ex-index-badge">
+                            #{exIdx + 1}
+                          </span>
+                          {exObj?.thumbnailUrl && (
+                            <img
+                              src={exObj.thumbnailUrl}
+                              alt=""
+                              className="routine-line-thumb"
+                            />
+                          )}
+                          <select
+                            className="draft-ex-select"
+                            value={exItem.exerciseId}
+                            onChange={(e) =>
+                              handleChangeDraftExerciseId(exIdx, e.target.value)
+                            }
+                          >
+                            {exercisesLibrary.map((libEx) => (
+                              <option key={libEx.id} value={libEx.id}>
+                                {getExName(libEx)}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="draft-ex-Order-actions">
+                          <button
+                            type="button"
+                            className="icon-btn-subtle"
+                            onClick={() => handleMoveDraftExercise(exIdx, -1)}
+                            disabled={exIdx === 0}
+                            title={lang === 'es' ? 'Subir ejercicio' : 'Move up'}
+                          >
+                            <ArrowUp size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            className="icon-btn-subtle"
+                            onClick={() => handleMoveDraftExercise(exIdx, 1)}
+                            disabled={
+                              exIdx ===
+                              (editingRoutine.exercises || []).length - 1
+                            }
+                            title={
+                              lang === 'es' ? 'Bajar ejercicio' : 'Move down'
+                            }
+                          >
+                            <ArrowDown size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            className="icon-btn-subtle danger"
+                            onClick={() => {
+                              const next = editingRoutine.exercises.filter(
+                                (_, i) => i !== exIdx
+                              );
+                              setEditingRoutine({
+                                ...editingRoutine,
+                                exercises: next,
+                              });
+                            }}
+                            title={
+                              lang === 'es'
+                                ? 'Quitar ejercicio de la rutina'
+                                : 'Remove exercise'
+                            }
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       </div>
 
-                      <div className="draft-sets-mini-grid">
+                      {/* Exercise Note & Rest Seconds Row */}
+                      <div className="draft-ex-meta-row">
+                        <div className="draft-ex-note-input">
+                          <FileText size={13} className="text-muted shrink-0" />
+                          <input
+                            type="text"
+                            value={exItem.note || ''}
+                            onChange={(e) =>
+                              handleUpdateDraftExField(
+                                exIdx,
+                                'note',
+                                e.target.value
+                              )
+                            }
+                            placeholder={
+                              lang === 'es'
+                                ? 'Nota personal (ej. Condo 21, Weight bar 40, Nivel 6)...'
+                                : 'Exercise note (e.g. Condo 21, Weight bar 40, Seat 4)...'
+                            }
+                          />
+                        </div>
+
+                        <div className="draft-ex-rest-control">
+                          <Timer size={13} className="text-blue shrink-0" />
+                          <span>{lang === 'es' ? 'Descanso:' : 'Rest:'}</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="5"
+                            value={exItem.restSeconds ?? 45}
+                            onChange={(e) =>
+                              handleUpdateDraftExField(
+                                exIdx,
+                                'restSeconds',
+                                e.target.value === ''
+                                  ? ''
+                                  : Number(e.target.value)
+                              )
+                            }
+                          />
+                          <span>s</span>
+                        </div>
+                      </div>
+
+                      {/* Sets Table inside Routine Editor */}
+                      <div className="draft-sets-table">
+                        <div className="draft-sets-thead">
+                          <span>{lang === 'es' ? 'SERIE' : 'SET'}</span>
+                          <span>
+                            {lang === 'es' ? 'PESO' : 'WEIGHT'} (
+                            {unit.toUpperCase()})
+                          </span>
+                          <span>REPS</span>
+                          <span>RPE</span>
+                          <span />
+                        </div>
+
                         {(exItem.sets || []).map((s, sIdx) => (
-                          <div key={sIdx} className="draft-set-pill-row">
-                            <span className="draft-set-num">#{sIdx + 1}</span>
+                          <div key={sIdx} className="draft-set-row">
+                            <button
+                              type="button"
+                              className={`set-type-badge type-${s.type || 'normal'}`}
+                              onClick={() => handleCycleDraftSetType(exIdx, sIdx)}
+                              title={
+                                lang === 'es'
+                                  ? 'Toca para cambiar tipo: Normal / W / D / F'
+                                  : 'Click to cycle set type: Normal / W / D / F'
+                              }
+                            >
+                              {renderSetBadgeLabel(s, sIdx)}
+                            </button>
+
                             <input
                               type="number"
-                              value={formatWeightValue(s.weight, unit)}
+                              step="any"
+                              className="draft-set-input"
+                              value={
+                                s.weight === ''
+                                  ? ''
+                                  : formatWeightValue(s.weight, unit)
+                              }
                               onChange={(e) => {
+                                const raw = e.target.value;
                                 const nextExs = [...editingRoutine.exercises];
                                 const nextSets = [...nextExs[exIdx].sets];
                                 nextSets[sIdx] = {
                                   ...nextSets[sIdx],
-                                  weight: toLbs(e.target.value, unit),
+                                  weight: raw === '' ? '' : toLbs(raw, unit),
                                 };
                                 nextExs[exIdx] = {
                                   ...nextExs[exIdx],
@@ -392,16 +808,19 @@ export default function RoutinesView({
                                 });
                               }}
                             />
-                            <span>{unit} ×</span>
+
                             <input
                               type="number"
-                              value={s.reps}
+                              step="1"
+                              className="draft-set-input"
+                              value={s.reps === '' ? '' : s.reps}
                               onChange={(e) => {
+                                const raw = e.target.value;
                                 const nextExs = [...editingRoutine.exercises];
                                 const nextSets = [...nextExs[exIdx].sets];
                                 nextSets[sIdx] = {
                                   ...nextSets[sIdx],
-                                  reps: Number(e.target.value),
+                                  reps: raw === '' ? '' : Number(raw),
                                 };
                                 nextExs[exIdx] = {
                                   ...nextExs[exIdx],
@@ -413,33 +832,94 @@ export default function RoutinesView({
                                 });
                               }}
                             />
-                            <span>reps</span>
+
+                            <input
+                              type="number"
+                              step="0.5"
+                              min="5"
+                              max="10"
+                              className="draft-set-input rpe-input"
+                              value={s.rpe ?? 8}
+                              onChange={(e) => {
+                                const raw = e.target.value;
+                                const nextExs = [...editingRoutine.exercises];
+                                const nextSets = [...nextExs[exIdx].sets];
+                                nextSets[sIdx] = {
+                                  ...nextSets[sIdx],
+                                  rpe: raw === '' ? '' : Number(raw),
+                                };
+                                nextExs[exIdx] = {
+                                  ...nextExs[exIdx],
+                                  sets: nextSets,
+                                };
+                                setEditingRoutine({
+                                  ...editingRoutine,
+                                  exercises: nextExs,
+                                });
+                              }}
+                            />
+
+                            <button
+                              type="button"
+                              className="set-delete-btn"
+                              onClick={() => handleRemoveDraftSet(exIdx, sIdx)}
+                              title={
+                                lang === 'es' ? 'Borrar serie' : 'Delete set'
+                              }
+                            >
+                              <X size={14} />
+                            </button>
                           </div>
                         ))}
-                        <button
-                          type="button"
-                          className="mini-add-set-btn"
-                          onClick={() => {
-                            const nextExs = [...editingRoutine.exercises];
-                            const last =
-                              nextExs[exIdx].sets[
-                                nextExs[exIdx].sets.length - 1
-                              ] || { weight: 95, reps: 10 };
-                            nextExs[exIdx] = {
-                              ...nextExs[exIdx],
-                              sets: [
-                                ...nextExs[exIdx].sets,
-                                { ...last, type: 'normal' },
-                              ],
-                            };
-                            setEditingRoutine({
-                              ...editingRoutine,
-                              exercises: nextExs,
-                            });
-                          }}
-                        >
-                          + Serie
-                        </button>
+
+                        <div className="draft-set-actions-bar">
+                          <button
+                            type="button"
+                            className="mini-add-set-btn"
+                            onClick={() => {
+                              const nextExs = [...editingRoutine.exercises];
+                              const last =
+                                nextExs[exIdx].sets[
+                                  nextExs[exIdx].sets.length - 1
+                                ] || { weight: 95, reps: 8, rpe: 8 };
+                              nextExs[exIdx] = {
+                                ...nextExs[exIdx],
+                                sets: [
+                                  ...nextExs[exIdx].sets,
+                                  { ...last, type: 'normal' },
+                                ],
+                              };
+                              setEditingRoutine({
+                                ...editingRoutine,
+                                exercises: nextExs,
+                              });
+                            }}
+                          >
+                            <Plus size={13} />
+                            <span>
+                              {lang === 'es' ? 'Agregar Serie' : 'Add Set'}
+                            </span>
+                          </button>
+
+                          {(exItem.sets || []).length > 1 && (
+                            <button
+                              type="button"
+                              className="mini-equalize-btn"
+                              onClick={() => handleEqualizeSets(exIdx)}
+                              title={
+                                lang === 'es'
+                                  ? 'Copiar peso y reps de la Serie #1 a todas las series de este ejercicio'
+                                  : 'Copy Set #1 weight & reps to all sets in this exercise'
+                              }
+                            >
+                              <span>
+                                {lang === 'es'
+                                  ? '= Igualar a Serie #1'
+                                  : '= Match Set #1'}
+                              </span>
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   );
@@ -448,6 +928,74 @@ export default function RoutinesView({
 
               {/* Quick Picker to Add Exercise to Routine */}
               <div className="routine-add-ex-picker">
+                <div className="picker-top-row">
+                  <h4>
+                    <Plus size={15} className="text-blue" />{' '}
+                    {lang === 'es'
+                      ? 'Agregar Ejercicio a la Rutina'
+                      : 'Add Exercise to Routine'}
+                  </h4>
+                  <button
+                    type="button"
+                    className="link-btn"
+                    onClick={() => setShowCustomCreator((v) => !v)}
+                  >
+                    <Sparkles size={13} />
+                    <span>
+                      {showCustomCreator
+                        ? lang === 'es'
+                          ? 'Cerrar creador'
+                          : 'Close creator'
+                        : lang === 'es'
+                        ? '+ Crear Ejercicio Propio'
+                        : '+ Create Custom Exercise'}
+                    </span>
+                  </button>
+                </div>
+
+                {showCustomCreator && (
+                  <div className="inline-custom-ex-creator">
+                    <input
+                      type="text"
+                      value={customExName}
+                      onChange={(e) => setCustomExName(e.target.value)}
+                      placeholder={
+                        lang === 'es'
+                          ? 'Nombre del nuevo ejercicio...'
+                          : 'New exercise name...'
+                      }
+                    />
+                    <select
+                      value={customExMuscle}
+                      onChange={(e) => setCustomExMuscle(e.target.value)}
+                    >
+                      {MUSCLE_KEYS.filter((m) => m !== 'all').map((m) => (
+                        <option key={m} value={m}>
+                          {t.muscles[m]}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={customExEquip}
+                      onChange={(e) => setCustomExEquip(e.target.value)}
+                    >
+                      {EQUIP_KEYS.map((eq) => (
+                        <option key={eq} value={eq}>
+                          {t.equipment[eq]}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="primary-btn"
+                      onClick={handleCreateCustomExInModal}
+                    >
+                      <Plus size={15} />
+                      <span>{lang === 'es' ? 'Crear y Añadir' : 'Add'}</span>
+                    </button>
+                  </div>
+                )}
+
                 <div className="modal-search-bar">
                   <Search size={15} />
                   <input
@@ -457,17 +1005,35 @@ export default function RoutinesView({
                     placeholder={t.exercises.searchPlaceholder}
                   />
                 </div>
+
+                <div className="muscle-filter-chips-scroll mb-10">
+                  {MUSCLE_KEYS.map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      className={`filter-chip ${pickerMuscle === m ? 'active' : ''}`}
+                      onClick={() => setPickerMuscle(m)}
+                    >
+                      {t.muscles[m]}
+                    </button>
+                  ))}
+                </div>
+
                 <div className="routine-picker-chips">
                   {exercisesLibrary
                     .filter((ex) => {
+                      const matchesMuscle =
+                        pickerMuscle === 'all' ||
+                        ex.primaryMuscle === pickerMuscle ||
+                        (ex.secondaryMuscles || []).includes(pickerMuscle);
                       const q = exSearch.trim().toLowerCase();
-                      return (
+                      const matchesSearch =
                         !q ||
-                        ex.nameEs.toLowerCase().includes(q) ||
-                        ex.nameEn.toLowerCase().includes(q)
-                      );
+                        (ex.nameEs || '').toLowerCase().includes(q) ||
+                        (ex.nameEn || '').toLowerCase().includes(q);
+                      return matchesMuscle && matchesSearch;
                     })
-                    .slice(0, 12)
+                    .slice(0, 24)
                     .map((ex) => (
                       <button
                         key={ex.id}
@@ -475,17 +1041,34 @@ export default function RoutinesView({
                         className="picker-ex-chip"
                         onClick={() => handleAddExToRoutineDraft(ex.id)}
                       >
-                        <Plus size={13} />
+                        {ex.thumbnailUrl ? (
+                          <img
+                            src={ex.thumbnailUrl}
+                            alt=""
+                            className="picker-chip-thumb"
+                          />
+                        ) : (
+                          <Plus size={13} />
+                        )}
                         <span>{getExName(ex)}</span>
                       </button>
                     ))}
                 </div>
               </div>
 
-              <button type="submit" className="primary-btn full-width mt-16">
-                <Check size={18} />
-                <span>{t.routines.saveRoutineBtn}</span>
-              </button>
+              <div className="modal-sticky-footer">
+                <button
+                  type="button"
+                  className="secondary-btn"
+                  onClick={() => setEditingRoutine(null)}
+                >
+                  <span>{lang === 'es' ? 'Cancelar' : 'Cancel'}</span>
+                </button>
+                <button type="submit" className="primary-btn">
+                  <Check size={18} />
+                  <span>{t.routines.saveRoutineBtn}</span>
+                </button>
+              </div>
             </form>
           </div>
         </div>

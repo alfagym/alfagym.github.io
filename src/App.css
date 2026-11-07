@@ -147,6 +147,29 @@
   z-index: 2;
 }
 
+.auth-container.auth-centered {
+  max-width: 440px;
+  display: block;
+}
+
+.auth-logo-centered {
+  justify-content: center;
+  margin-bottom: 20px;
+}
+
+.brand-title-sm {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.brand-subtitle-sm {
+  color: var(--text-secondary);
+  font-size: 13px;
+  margin-top: 2px;
+}
+
 .auth-brand-panel {
   display: flex;
   flex-direction: column;

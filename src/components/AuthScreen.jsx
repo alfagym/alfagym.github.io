@@ -142,72 +142,19 @@ export default function AuthScreen({
         </div>
       </div>
 
-      <div className="auth-container">
-        {/* Left Brand Column */}
-        <div className="auth-brand-panel">
-          <div className="brand-logo-row">
+      <div className="auth-container auth-centered">
+        {/* Centered Private Access Card */}
+        <div className="auth-card">
+          <div className="brand-logo-row auth-logo-centered">
             <div className="brand-icon-box">
-              <Dumbbell size={32} />
+              <Dumbbell size={28} />
             </div>
             <div>
-              <h1 className="brand-title">{t.appName}</h1>
-              <p className="brand-subtitle">{t.tagline}</p>
+              <h1 className="brand-title-sm">{t.appName}</h1>
+              <p className="brand-subtitle-sm">{t.tagline}</p>
             </div>
           </div>
 
-          <div className="brand-feature-list">
-            <div className="brand-feature-item">
-              <span className="feature-dot blue" />
-              <div>
-                <strong>
-                  {lang === 'es'
-                    ? 'Registro en Vivo Estilo Hevy Pro'
-                    : 'Hevy Pro-Style Live Workout Logger'}
-                </strong>
-                <p>
-                  {lang === 'es'
-                    ? 'Series normales, calentamiento (W), drop sets (D) y fallo (F), columna Anterior, RPE y cronómetro automático de descanso.'
-                    : 'Track Normal, Warm-up (W), Drop (D) & Failure (F) sets, Previous performance, RPE, and auto rest timer.'}
-                </p>
-              </div>
-            </div>
-
-            <div className="brand-feature-item">
-              <span className="feature-dot emerald" />
-              <div>
-                <strong>
-                  {lang === 'es'
-                    ? 'Mapa Muscular Anatómico y Detección de PRs 🏆'
-                    : 'Anatomical Muscle Map & Live PR Detection 🏆'}
-                </strong>
-                <p>
-                  {lang === 'es'
-                    ? 'Más de 50 ejercicios con diagrama corporal frontal/posterior, cálculo de 1RM, volumen semanal y récords en tiempo real.'
-                    : '50+ exercises with interactive front/back body heatmap, 1RM tracking, weekly volume charts, and real-time PR trophies.'}
-                </p>
-              </div>
-            </div>
-
-            <div className="brand-feature-item">
-              <span className="feature-dot amber" />
-              <div>
-                <strong>
-                  {lang === 'es'
-                    ? 'Datos 100% Privados en tu Dispositivo + Gist Cifrado'
-                    : '100% Private On-Device Data + Encrypted GitHub Sync'}
-                </strong>
-                <p>
-                  {lang === 'es'
-                    ? 'Tus entrenamientos nunca son públicos: viven en la memoria privada de tu iPhone y se sincronizan solo con tu Token personal.'
-                    : 'Your workouts are never public: they stay in your device storage and sync privately via your personal token.'}
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Right Strict Private Access Card */}
-        <div className="auth-card">
           <div className="auth-tabs">
             <button
               type="button"
@@ -231,19 +178,6 @@ export default function AuthScreen({
               <User size={15} />
               <span>{t.auth.registerTab}</span>
             </button>
-          </div>
-
-          <div className="auth-card-header">
-            <h2>
-              {mode === 'login'
-                ? t.auth.welcomeBack
-                : t.auth.createYourAccount}
-            </h2>
-            <p>
-              {mode === 'login'
-                ? t.auth.subtitleLogin
-                : t.auth.subtitleRegister}
-            </p>
           </div>
 
           <form onSubmit={handleSubmit} className="auth-form">

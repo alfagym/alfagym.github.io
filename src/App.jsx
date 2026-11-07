@@ -10,12 +10,12 @@ import {
   Scale,
   Flame,
   Timer,
+  UserCog,
 } from 'lucide-react';
 import { translations } from './data/translations';
 import {
   EXERCISES_LIBRARY,
   DEFAULT_ROUTINES,
-  createInitialWorkouts,
   createInitialMeasurements,
 } from './data/gymData';
 import { formatClock, playGymSound } from './utils/workoutMath';
@@ -27,10 +27,11 @@ import ExercisesLibraryView from './components/ExercisesLibraryView';
 import AnalyticsHistoryView from './components/AnalyticsHistoryView';
 import ToolsAndBodyView from './components/ToolsAndBodyView';
 import CloudSyncModal from './components/CloudSyncModal';
+import AccountModal from './components/AccountModal';
 import './App.css';
 
 /* global __BUILD_TIMESTAMP__ */
-const FALLBACK_TIMESTAMP = '11:42 PM - 11/06/2026';
+const FALLBACK_TIMESTAMP = '11:48 PM - 11/06/2026';
 const BUILD_TIMESTAMP =
   typeof __BUILD_TIMESTAMP__ !== 'undefined'
     ? __BUILD_TIMESTAMP__
@@ -38,6 +39,21 @@ const BUILD_TIMESTAMP =
 
 const MASTER_PASSWORD_SHA256 =
   '3eb3fe66b31e3b4d10fa70b5cad49c7112294af6ae4e476a1c405155d45aa121';
+
+const REMOVED_SAMPLE_ROUTINE_IDS = new Set([
+  'routine-push-pro',
+  'routine-pull-pro',
+  'routine-legs-pro',
+  'routine-upper-hypertrophy',
+  'routine-fullbody-alfa',
+]);
+
+const REMOVED_SAMPLE_WORKOUT_IDS = new Set([
+  'wk-sample-1',
+  'wk-sample-2',
+  'wk-sample-3',
+  'wk-sample-4',
+]);
 
 const DEFAULT_ACCOUNTS = [
   {
@@ -48,6 +64,16 @@ const DEFAULT_ACCOUNTS = [
     goal: 'hypertrophy',
     preferredUnit: 'lbs',
     streak: 5,
+    createdAt: '2026-11-06T22:00:00.000Z',
+  },
+  {
+    id: 'lorena-alfa',
+    name: 'Lorena Santana',
+    identifier: 'lorena',
+    passwordHash: MASTER_PASSWORD_SHA256,
+    goal: 'hypertrophy',
+    preferredUnit: 'lbs',
+    streak: 1,
     createdAt: '2026-11-06T22:00:00.000Z',
   },
 ];
@@ -68,11 +94,14 @@ function loadUserRoutines(userKey) {
   const deletedIds = deletedRaw ? JSON.parse(deletedRaw) : [];
 
   const mergeMissingHevyRoutines = (savedList) => {
+    const cleanedList = (savedList || []).filter(
+      (r) => r && !REMOVED_SAMPLE_ROUTINE_IDS.has(r.id)
+    );
     const hevyDefaults = DEFAULT_ROUTINES.filter((dr) =>
       dr.id.startsWith('routine-hevy-')
     );
     const savedById = {};
-    for (const r of savedList) {
+    for (const r of cleanedList) {
       savedById[r.id] = r;
     }
     // Keep all 6 Hevy routines in 1-6 order at the top (using the user's edited version if already saved, unless deleted)
@@ -85,7 +114,9 @@ function loadUserRoutines(userKey) {
         topHevy.push(JSON.parse(JSON.stringify(hd)));
       }
     }
-    const others = savedList.filter((r) => !r.id.startsWith('routine-hevy-'));
+    const others = cleanedList.filter(
+      (r) => !r.id.startsWith('routine-hevy-')
+    );
     return [...topHevy, ...others];
   };
 
@@ -94,7 +125,12 @@ function loadUserRoutines(userKey) {
     if (userSaved) {
       const parsed = JSON.parse(userSaved);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return mergeMissingHevyRoutines(parsed);
+        const merged = mergeMissingHevyRoutines(parsed);
+        localStorage.setItem(
+          `alfa_gym_routines_${userKey}`,
+          JSON.stringify(merged)
+        );
+        return merged;
       }
     }
     // Initial migration for Raydel if legacy key exists
@@ -132,15 +168,20 @@ function loadUserWorkouts(userKey) {
     const userSaved = localStorage.getItem(`alfa_gym_workouts_${userKey}`);
     if (userSaved) {
       const parsed = JSON.parse(userSaved);
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed)) {
+        return parsed.filter((w) => !REMOVED_SAMPLE_WORKOUT_IDS.has(w.id));
+      }
     }
     if (userKey === 'raydel') {
       const legacy = localStorage.getItem('alfa_gym_workouts');
       if (legacy) {
         const parsedLegacy = JSON.parse(legacy);
-        if (Array.isArray(parsedLegacy)) return parsedLegacy;
+        if (Array.isArray(parsedLegacy)) {
+          return parsedLegacy.filter(
+            (w) => !REMOVED_SAMPLE_WORKOUT_IDS.has(w.id)
+          );
+        }
       }
-      return createInitialWorkouts();
     }
   } catch {
     // ignore
@@ -224,11 +265,22 @@ export default function App() {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map((acc) =>
+          const updated = parsed.map((acc) =>
             acc.id === 'raydel-alfa'
               ? { ...acc, passwordHash: MASTER_PASSWORD_SHA256, password: '' }
               : acc
           );
+          // Ensure Lorena Santana exists in accounts
+          const hasLorena = updated.some(
+            (a) =>
+              a.id === 'lorena-alfa' ||
+              (a.identifier && a.identifier.toLowerCase() === 'lorena') ||
+              (a.name && a.name.toLowerCase() === 'lorena santana')
+          );
+          if (!hasLorena) {
+            updated.push(DEFAULT_ACCOUNTS[1]);
+          }
+          return updated;
         }
       }
     } catch {
@@ -251,10 +303,11 @@ export default function App() {
     [currentUser]
   );
 
-  // Main Navigation Tab & Quick Routine Edit Target
+  // Main Navigation Tab & Modals
   const [activeTab, setActiveTab] = useState('workout');
   const [editingRoutineIdTarget, setEditingRoutineIdTarget] = useState(null);
   const [showCloudModal, setShowCloudModal] = useState(false);
+  const [showAccountModal, setShowAccountModal] = useState(false);
 
   // Per-User Workouts History
   const [workouts, setWorkouts] = useState(() =>
@@ -318,6 +371,43 @@ export default function App() {
       }
     }
   };
+
+  // Save account profile edits (and migrate localStorage keys if identifier changed)
+  const handleSaveAccountChanges = (updatedUser) => {
+    const oldKey = getUserStorageKey(currentUser);
+    const newKey = getUserStorageKey(updatedUser);
+
+    if (oldKey !== newKey) {
+      const prefixes = [
+        'alfa_gym_routines_',
+        'alfa_gym_workouts_',
+        'alfa_gym_measurements_',
+        'alfa_gym_custom_exercises_',
+        'alfa_gym_active_workout_',
+        'alfa_gym_deleted_routines_',
+      ];
+      for (const prefix of prefixes) {
+        const val = localStorage.getItem(`${prefix}${oldKey}`);
+        if (val !== null) {
+          localStorage.setItem(`${prefix}${newKey}`, val);
+        }
+      }
+    }
+
+    setAccounts((prev) =>
+      prev.map((acc) => (acc.id === updatedUser.id ? updatedUser : acc))
+    );
+    setCurrentUser(updatedUser);
+    if (updatedUser.preferredUnit) {
+      setUnit(updatedUser.preferredUnit);
+    }
+  };
+
+  // Ensure both Raydel and Lorena Santana have their 6 Hevy routines pre-synced & sample routines cleaned
+  useEffect(() => {
+    loadUserRoutines('raydel');
+    loadUserRoutines('lorena');
+  }, []);
 
   // Automatic Live Update Checker for Mobile / iOS Home Screen PWA
   useEffect(() => {
@@ -769,8 +859,22 @@ export default function App() {
           </button>
         </nav>
 
-        {/* Right Controls: Unit Toggle, Language Toggle & Logout */}
+        {/* Right Controls: Account Profile Editor, Unit Toggle, Language Toggle & Logout */}
         <div className="alfa-header-actions">
+          <button
+            type="button"
+            className="header-pill-btn account-pill-btn"
+            onClick={() => setShowAccountModal(true)}
+            title={
+              lang === 'es'
+                ? 'Editar datos de mi cuenta / Cambiar usuario'
+                : 'Edit account profile / Switch user'
+            }
+          >
+            <UserCog size={14} />
+            <span>{currentUser.name.split(' ')[0]}</span>
+          </button>
+
           <button
             type="button"
             className="header-pill-btn unit-pill"
@@ -952,6 +1056,19 @@ export default function App() {
           <span>{t.nav.tools}</span>
         </button>
       </nav>
+
+      {/* Account Editor & User Switcher Modal */}
+      {showAccountModal && (
+        <AccountModal
+          lang={lang}
+          t={t}
+          currentUser={currentUser}
+          accounts={accounts}
+          onSaveAccountChanges={handleSaveAccountChanges}
+          onSwitchUser={(acc) => handleSelectActiveUser(acc)}
+          onClose={() => setShowAccountModal(false)}
+        />
+      )}
 
       {/* Cloud Sync Modal */}
       {showCloudModal && (

@@ -81,10 +81,12 @@ export default function AuthScreen({
       setUnit(preferredUnit);
       onRegisterAccount(newAccount);
     } else {
+      const cleanNoSpaces = cleanId.replace(/\s+/g, '');
       const matched = accounts.find(
         (acc) =>
           acc.identifier.toLowerCase() === cleanId ||
-          acc.name.toLowerCase() === cleanId
+          acc.name.toLowerCase() === cleanId ||
+          acc.name.toLowerCase().replace(/\s+/g, '') === cleanNoSpaces
       );
 
       if (matched) {

@@ -3119,6 +3119,106 @@
 }
 
 /* ==========================================================================
+   ACCOUNT PROFILE EDITOR & USER SWITCHER MODAL
+   ========================================================================== */
+.account-pill-btn {
+  border-color: rgba(56, 189, 248, 0.4);
+  color: #38bdf8;
+}
+
+.account-modal-panel {
+  max-width: 480px;
+  width: 94%;
+}
+
+.account-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.account-switcher-section {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.account-switcher-section h4 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13.5px;
+  margin-bottom: 10px;
+}
+
+.account-switcher-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.account-switch-pill {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  text-align: left;
+  transition: all 0.15s ease;
+}
+
+.account-switch-pill.active {
+  border-color: var(--blue-primary);
+  background: rgba(29, 140, 248, 0.12);
+}
+
+.acc-switch-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.acc-avatar-circle {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #1d8cf8, #10b981);
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.acc-switch-left strong {
+  display: block;
+  font-size: 14px;
+}
+
+.acc-id-sub {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.acc-active-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #34d399;
+}
+
+.acc-switch-cta {
+  font-size: 12px;
+  font-weight: 700;
+  color: #38bdf8;
+}
+
+/* ==========================================================================
    RESPONSIVE BREAKPOINTS (MOBILE / IPHONE)
    ========================================================================== */
 @media (max-width: 920px) {

@@ -13,7 +13,7 @@ import { sha256Hex } from '../utils/workoutMath';
 
 // SHA-256 hash of default master password (never stored in plain text in repository)
 const MASTER_PASSWORD_SHA256 =
-  'a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3';
+  '3eb3fe66b31e3b4d10fa70b5cad49c7112294af6ae4e476a1c405155d45aa121';
 
 export default function AuthScreen({
   lang,

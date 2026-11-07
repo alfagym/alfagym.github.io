@@ -31,19 +31,21 @@ import CloudSyncModal from './components/CloudSyncModal';
 import './App.css';
 
 /* global __BUILD_TIMESTAMP__ */
-const FALLBACK_TIMESTAMP = '10:50 PM - 11/06/2026';
+const FALLBACK_TIMESTAMP = '10:57 PM - 11/06/2026';
 const BUILD_TIMESTAMP =
   typeof __BUILD_TIMESTAMP__ !== 'undefined'
     ? __BUILD_TIMESTAMP__
     : FALLBACK_TIMESTAMP;
+
+const MASTER_PASSWORD_SHA256 =
+  '3eb3fe66b31e3b4d10fa70b5cad49c7112294af6ae4e476a1c405155d45aa121';
 
 const DEFAULT_ACCOUNTS = [
   {
     id: 'raydel-alfa',
     name: 'Raydel',
     identifier: 'raydel',
-    passwordHash:
-      'a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3',
+    passwordHash: MASTER_PASSWORD_SHA256,
     goal: 'hypertrophy',
     preferredUnit: 'lbs',
     streak: 5,
@@ -67,7 +69,13 @@ export default function App() {
       const saved = localStorage.getItem('alfa_gym_accounts');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map((acc) =>
+            acc.id === 'raydel-alfa'
+              ? { ...acc, passwordHash: MASTER_PASSWORD_SHA256, password: '' }
+              : acc
+          );
+        }
       }
     } catch {
       // ignore
@@ -496,18 +504,6 @@ export default function App() {
           >
             <Globe size={14} />
             <span>{lang.toUpperCase()}</span>
-          </button>
-
-          <button
-            type="button"
-            className={`header-pill-btn ${
-              cloudConfig.lastSynced ? 'synced' : ''
-            }`}
-            onClick={() => setShowCloudModal(true)}
-            title={t.nav.cloudSync}
-          >
-            <Cloud size={15} />
-            <span className="hide-sm">{t.nav.cloudSync}</span>
           </button>
 
           <button

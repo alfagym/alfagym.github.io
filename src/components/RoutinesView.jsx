@@ -492,7 +492,6 @@ export default function RoutinesView({
                                 alt={getExName(exObj)}
                                 className="routine-line-thumb"
                               />
-                              <span className="thumb-zoom-badge">🔍</span>
                             </button>
                           )}
                           <span>
@@ -670,7 +669,6 @@ export default function RoutinesView({
                                 alt={getExName(exObj)}
                                 className="routine-line-thumb"
                               />
-                              <span className="thumb-zoom-badge">🔍</span>
                             </button>
                           )}
                           <select

@@ -853,7 +853,6 @@ export default function LiveWorkoutLogger({
                           alt={getExName(exObj)}
                           className="hevy-ex-thumb"
                         />
-                        <span className="thumb-zoom-badge">🔍</span>
                       </button>
                     )}
                     <div className="live-ex-title-group">

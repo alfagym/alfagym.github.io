@@ -18,6 +18,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { formatWeightValue, toLbs } from '../utils/workoutMath';
+import ExerciseMediaModal from './ExerciseMediaModal';
 
 const SET_TYPE_ORDER = ['normal', 'warmup', 'dropset', 'failure'];
 
@@ -64,6 +65,7 @@ export default function RoutinesView({
 }) {
   const [selectedFolder, setSelectedFolder] = useState('all');
   const [editingRoutine, setEditingRoutine] = useState(null);
+  const [previewExercise, setPreviewExercise] = useState(null);
   const [exSearch, setExSearch] = useState('');
   const [pickerMuscle, setPickerMuscle] = useState('all');
 
@@ -475,11 +477,23 @@ export default function RoutinesView({
                       <div className="routine-ex-line-left">
                         <span className="routine-ex-name">
                           {exObj?.thumbnailUrl && (
-                            <img
-                              src={exObj.thumbnailUrl}
-                              alt=""
-                              className="routine-line-thumb"
-                            />
+                            <button
+                              type="button"
+                              className="thumb-zoom-btn"
+                              onClick={() => setPreviewExercise(exObj)}
+                              title={
+                                lang === 'es'
+                                  ? 'Toca para ver la imagen/video en grande'
+                                  : 'Tap to enlarge exercise image/video'
+                              }
+                            >
+                              <img
+                                src={exObj.thumbnailUrl}
+                                alt={getExName(exObj)}
+                                className="routine-line-thumb"
+                              />
+                              <span className="thumb-zoom-badge">🔍</span>
+                            </button>
                           )}
                           <span>
                             <strong>{exItem.sets?.length || 3}×</strong>{' '}
@@ -641,11 +655,23 @@ export default function RoutinesView({
                             #{exIdx + 1}
                           </span>
                           {exObj?.thumbnailUrl && (
-                            <img
-                              src={exObj.thumbnailUrl}
-                              alt=""
-                              className="routine-line-thumb"
-                            />
+                            <button
+                              type="button"
+                              className="thumb-zoom-btn"
+                              onClick={() => setPreviewExercise(exObj)}
+                              title={
+                                lang === 'es'
+                                  ? 'Toca para ver la imagen/video en grande'
+                                  : 'Tap to enlarge exercise image/video'
+                              }
+                            >
+                              <img
+                                src={exObj.thumbnailUrl}
+                                alt={getExName(exObj)}
+                                className="routine-line-thumb"
+                              />
+                              <span className="thumb-zoom-badge">🔍</span>
+                            </button>
                           )}
                           <select
                             className="draft-ex-select"
@@ -1073,6 +1099,13 @@ export default function RoutinesView({
           </div>
         </div>
       )}
+
+      <ExerciseMediaModal
+        exercise={previewExercise}
+        lang={lang}
+        t={t}
+        onClose={() => setPreviewExercise(null)}
+      />
     </div>
   );
 }

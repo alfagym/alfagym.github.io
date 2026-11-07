@@ -32,6 +32,7 @@ import {
   calculatePlateBreakdown,
   playGymSound,
 } from '../utils/workoutMath';
+import ExerciseMediaModal from './ExerciseMediaModal';
 
 const SET_TYPE_ORDER = ['normal', 'warmup', 'dropset', 'failure'];
 const SUPERSET_GROUPS = [null, 'A', 'B', 'C'];
@@ -60,6 +61,7 @@ export default function LiveWorkoutLogger({
   onNavigateTab,
 }) {
   const [routineSavedToast, setRoutineSavedToast] = useState(false);
+  const [previewExercise, setPreviewExercise] = useState(null);
   const [showAddExerciseModal, setShowAddExerciseModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [muscleFilter, setMuscleFilter] = useState('all');
@@ -548,8 +550,26 @@ export default function LiveWorkoutLogger({
                     {(rt.exercises || []).slice(0, 4).map((exItem, idx) => {
                       const exObj = exerciseMap[exItem.exerciseId];
                       return (
-                        <span key={idx} className="ex-preview-chip">
-                          {exItem.sets?.length || 3}× {getExName(exObj)}
+                        <span
+                          key={idx}
+                          className="ex-preview-chip clickable-chip"
+                          onClick={() => exObj && setPreviewExercise(exObj)}
+                          title={
+                            lang === 'es'
+                              ? 'Toca para ver el ejercicio en grande'
+                              : 'Tap to view exercise in large view'
+                          }
+                        >
+                          {exObj?.thumbnailUrl && (
+                            <img
+                              src={exObj.thumbnailUrl}
+                              alt=""
+                              className="chip-mini-thumb"
+                            />
+                          )}
+                          <span>
+                            {exItem.sets?.length || 3}× {getExName(exObj)}
+                          </span>
                         </span>
                       );
                     })}
@@ -647,6 +667,13 @@ export default function LiveWorkoutLogger({
             </div>
           </div>
         )}
+
+        <ExerciseMediaModal
+          exercise={previewExercise}
+          lang={lang}
+          t={t}
+          onClose={() => setPreviewExercise(null)}
+        />
       </div>
     );
   }
@@ -811,11 +838,23 @@ export default function LiveWorkoutLogger({
                 <div className="live-ex-card-header">
                   <div className="live-ex-title-with-thumb">
                     {exObj.thumbnailUrl && (
-                      <img
-                        src={exObj.thumbnailUrl}
-                        alt={getExName(exObj)}
-                        className="hevy-ex-thumb"
-                      />
+                      <button
+                        type="button"
+                        className="thumb-zoom-btn"
+                        onClick={() => setPreviewExercise(exObj)}
+                        title={
+                          lang === 'es'
+                            ? 'Toca para ver la imagen/video en grande'
+                            : 'Tap to enlarge exercise image/video'
+                        }
+                      >
+                        <img
+                          src={exObj.thumbnailUrl}
+                          alt={getExName(exObj)}
+                          className="hevy-ex-thumb"
+                        />
+                        <span className="thumb-zoom-badge">🔍</span>
+                      </button>
                     )}
                     <div className="live-ex-title-group">
                       {exItem.supersetGroup && (
@@ -1328,25 +1367,60 @@ export default function LiveWorkoutLogger({
 
             <div className="modal-exercise-list">
               {filteredExercises.map((ex) => (
-                <button
-                  key={ex.id}
-                  type="button"
-                  className="modal-ex-row"
-                  onClick={() => handleAddExerciseToActive(ex)}
-                >
-                  <div>
-                    <strong>{getExName(ex)}</strong>
-                    <span className="modal-ex-sub">
-                      {t.muscles[ex.primaryMuscle]} • {t.equipment[ex.equipment]}
-                    </span>
+                <div key={ex.id} className="modal-ex-row">
+                  <div className="modal-ex-left">
+                    {ex.thumbnailUrl && (
+                      <button
+                        type="button"
+                        className="thumb-zoom-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPreviewExercise(ex);
+                        }}
+                        title={
+                          lang === 'es'
+                            ? 'Ver imagen en grande'
+                            : 'View large image'
+                        }
+                      >
+                        <img
+                          src={ex.thumbnailUrl}
+                          alt={getExName(ex)}
+                          className="routine-line-thumb"
+                        />
+                      </button>
+                    )}
+                    <div
+                      className="modal-ex-text-click"
+                      onClick={() => handleAddExerciseToActive(ex)}
+                    >
+                      <strong>{getExName(ex)}</strong>
+                      <span className="modal-ex-sub">
+                        {t.muscles[ex.primaryMuscle]} •{' '}
+                        {t.equipment[ex.equipment]}
+                      </span>
+                    </div>
                   </div>
-                  <Plus size={18} className="text-blue" />
-                </button>
+                  <button
+                    type="button"
+                    className="icon-btn-subtle"
+                    onClick={() => handleAddExerciseToActive(ex)}
+                  >
+                    <Plus size={18} className="text-blue" />
+                  </button>
+                </div>
               ))}
             </div>
           </div>
         </div>
       )}
+
+      <ExerciseMediaModal
+        exercise={previewExercise}
+        lang={lang}
+        t={t}
+        onClose={() => setPreviewExercise(null)}
+      />
     </div>
   );
 }

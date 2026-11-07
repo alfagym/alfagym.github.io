@@ -2985,6 +2985,140 @@
 }
 
 /* ==========================================================================
+   TAPPABLE THUMBNAILS & LARGE EXERCISE LIGHTBOX MODAL
+   ========================================================================== */
+.thumb-zoom-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 2px solid rgba(56, 189, 248, 0.35);
+  border-radius: 10px;
+  background: #ffffff;
+  overflow: hidden;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.thumb-zoom-btn:hover,
+.thumb-zoom-btn:active {
+  transform: scale(1.06);
+  border-color: #38bdf8;
+}
+
+.thumb-zoom-btn .hevy-ex-thumb,
+.thumb-zoom-btn .routine-line-thumb {
+  border: none;
+  border-radius: 0;
+  display: block;
+}
+
+.thumb-zoom-badge {
+  position: absolute;
+  bottom: 1px;
+  right: 1px;
+  font-size: 9px;
+  line-height: 1;
+  background: rgba(10, 14, 24, 0.82);
+  border-radius: 4px;
+  padding: 2px;
+  pointer-events: none;
+}
+
+.clickable-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.chip-mini-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  object-fit: cover;
+  background: #ffffff;
+}
+
+.modal-ex-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.modal-ex-text-click {
+  flex: 1;
+  cursor: pointer;
+  text-align: left;
+}
+
+.media-lightbox-backdrop {
+  z-index: 1400 !important;
+  background: rgba(4, 6, 12, 0.88);
+  backdrop-filter: blur(10px);
+}
+
+.media-lightbox-panel {
+  max-width: 620px;
+  width: 95%;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.media-lightbox-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.media-tab-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.media-tab-btn.active {
+  background: rgba(29, 140, 248, 0.18);
+  border-color: var(--blue-primary);
+  color: #38bdf8;
+}
+
+.media-lightbox-stage {
+  width: 100%;
+  background: #ffffff;
+  border-radius: 16px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-subtle);
+  min-height: 280px;
+  max-height: 70vh;
+}
+
+.media-lightbox-visual {
+  width: 100%;
+  max-height: 68vh;
+  object-fit: contain;
+  display: block;
+  background: #ffffff;
+}
+
+/* ==========================================================================
    RESPONSIVE BREAKPOINTS (MOBILE / IPHONE)
    ========================================================================== */
 @media (max-width: 920px) {

@@ -28,7 +28,7 @@ export default function AuthScreen({
 }) {
   const [mode, setMode] = useState('login'); // 'login' | 'register'
   const [name, setName] = useState('');
-  const [identifier, setIdentifier] = useState('raydel');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [goal, setGoal] = useState('hypertrophy');
@@ -42,7 +42,7 @@ export default function AuthScreen({
     const cleanId = identifier.trim().toLowerCase();
     const cleanPass = password.trim();
 
-    if (!cleanPass) {
+    if (!cleanId || !cleanPass) {
       setError(t.auth.errorEmpty);
       return;
     }
@@ -207,6 +207,7 @@ export default function AuthScreen({
                   onChange={(e) => setIdentifier(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder={t.auth.emailPlaceholder}
+                  autoFocus
                 />
               </div>
             </div>
@@ -221,7 +222,6 @@ export default function AuthScreen({
                   onChange={(e) => setPassword(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder={t.auth.passwordPlaceholder}
-                  autoFocus
                 />
               </div>
             </div>

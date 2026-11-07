@@ -68,13 +68,14 @@
    AUTH SCREEN ("ACCESO PRIVADO")
    ========================================================================== */
 .auth-wrapper {
-  min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  padding: 20px 28px 36px;
+  justify-content: flex-start;
+  padding: calc(16px + env(safe-area-inset-top, 0px)) 20px calc(32px + env(safe-area-inset-bottom, 0px));
   position: relative;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   background: radial-gradient(
     circle at 15% 15%,
     rgba(29, 140, 248, 0.12),
@@ -517,14 +518,14 @@
   position: sticky;
   top: 0;
   z-index: 50;
-  background: rgba(10, 13, 20, 0.9);
+  background: rgba(10, 13, 20, 0.94);
   backdrop-filter: blur(14px);
   border-bottom: 1px solid var(--border-subtle);
-  padding: 11px 22px;
+  padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 11px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 10px;
 }
 
 .alfa-brand-left {
@@ -2712,6 +2713,37 @@
    RESPONSIVE BREAKPOINTS (MOBILE / IPHONE)
    ========================================================================== */
 @media (max-width: 920px) {
+  /* Prevent iOS Safari/WebKit auto-zoom when tapping inputs */
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+
+  .auth-topbar {
+    margin: 0 auto 14px;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .auth-container.auth-centered {
+    margin: 8px auto auto;
+    width: 100%;
+  }
+
+  .auth-card {
+    padding: 20px 16px;
+  }
+
+  .alfa-main-content {
+    padding: 14px 12px 96px;
+  }
+
+  .alfa-mobile-bottom-nav {
+    display: flex;
+    padding: 6px 8px calc(14px + env(safe-area-inset-bottom, 0px));
+  }
+
   .auth-container,
   .exercises-layout-grid,
   .analytics-two-col,
@@ -2723,18 +2755,14 @@
     display: none;
   }
 
-  .alfa-mobile-bottom-nav {
-    display: flex;
-  }
-
   .hide-sm {
     display: none;
   }
 
   .hevy-sets-thead,
   .hevy-set-row {
-    grid-template-columns: 36px 1fr 68px 58px 54px 66px;
-    gap: 5px;
-    font-size: 11.5px;
+    grid-template-columns: 34px 1fr 64px 54px 50px 62px;
+    gap: 4px;
+    font-size: 11px;
   }
 }

@@ -1,3 +1,15 @@
+// Pure JS + WebCrypto SHA-256 hash so plain-text passwords never appear in GitHub code
+export async function sha256Hex(message) {
+  const clean = String(message || '').trim();
+  if (typeof window !== 'undefined' && window.crypto?.subtle) {
+    const msgBuffer = new TextEncoder().encode(clean);
+    const hashBuffer = await window.crypto.subtle.digest('SHA-256', msgBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  return clean;
+}
+
 // Epley 1RM formula
 export function calculate1RM(weight, reps) {
   const w = Number(weight) || 0;

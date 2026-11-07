@@ -31,7 +31,7 @@ import CloudSyncModal from './components/CloudSyncModal';
 import './App.css';
 
 /* global __BUILD_TIMESTAMP__ */
-const FALLBACK_TIMESTAMP = '10:18 PM - 11/06/2026';
+const FALLBACK_TIMESTAMP = '10:34 PM - 11/06/2026';
 const BUILD_TIMESTAMP =
   typeof __BUILD_TIMESTAMP__ !== 'undefined'
     ? __BUILD_TIMESTAMP__
@@ -42,7 +42,8 @@ const DEFAULT_ACCOUNTS = [
     id: 'raydel-alfa',
     name: 'Raydel',
     identifier: 'raydel',
-    password: '123',
+    passwordHash:
+      'a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3',
     goal: 'hypertrophy',
     preferredUnit: 'lbs',
     streak: 5,

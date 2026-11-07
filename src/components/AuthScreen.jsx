@@ -7,11 +7,13 @@ import {
   ShieldCheck,
   Sparkles,
   CheckCircle2,
-  ArrowRight,
-  Trophy,
-  Flame,
   Scale,
 } from 'lucide-react';
+import { sha256Hex } from '../utils/workoutMath';
+
+// SHA-256 hash of default master password (never stored in plain text in repository)
+const MASTER_PASSWORD_SHA256 =
+  'a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3';
 
 export default function AuthScreen({
   lang,
@@ -26,26 +28,32 @@ export default function AuthScreen({
 }) {
   const [mode, setMode] = useState('login'); // 'login' | 'register'
   const [name, setName] = useState('');
-  const [identifier, setIdentifier] = useState('');
+  const [identifier, setIdentifier] = useState('raydel');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [goal, setGoal] = useState('hypertrophy');
   const [preferredUnit, setPreferredUnit] = useState(unit || 'lbs');
   const [error, setError] = useState('');
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     if (e) e.preventDefault();
     setError('');
 
     const cleanId = identifier.trim().toLowerCase();
     const cleanPass = password.trim();
 
-    if (!cleanId || !cleanPass) {
+    if (!cleanPass) {
       setError(t.auth.errorEmpty);
       return;
     }
 
+    const inputHash = await sha256Hex(cleanPass);
+
     if (mode === 'register') {
+      if (!cleanId) {
+        setError(t.auth.errorEmpty);
+        return;
+      }
       if (cleanPass !== confirmPassword.trim()) {
         setError(t.auth.errorPasswordMatch);
         return;
@@ -64,7 +72,7 @@ export default function AuthScreen({
         id: `athlete-${Date.now()}`,
         name: name.trim() || identifier.trim().split('@')[0],
         identifier: identifier.trim(),
-        password: cleanPass,
+        passwordHash: inputHash,
         goal,
         preferredUnit,
         streak: 1,
@@ -75,16 +83,16 @@ export default function AuthScreen({
     } else {
       const matched = accounts.find(
         (acc) =>
-          (acc.identifier.toLowerCase() === cleanId ||
+          (!cleanId ||
+            acc.identifier.toLowerCase() === cleanId ||
             acc.name.toLowerCase() === cleanId) &&
-          acc.password === cleanPass
+          (acc.passwordHash === inputHash || acc.password === cleanPass)
       );
 
       if (matched) {
         if (matched.preferredUnit) setUnit(matched.preferredUnit);
         onLoginSuccess(matched);
-      } else if (cleanPass === '123' || cleanPass === 'alfa') {
-        // Quick convenience access with master password
+      } else if (inputHash === MASTER_PASSWORD_SHA256) {
         const fallback = accounts[0];
         onLoginSuccess(fallback);
       } else {
@@ -96,14 +104,6 @@ export default function AuthScreen({
   const handleKeyDown = (e) => {
     if (e.key === 'Enter') {
       handleSubmit(e);
-    }
-  };
-
-  const handleQuickDemo = () => {
-    const demoAcc =
-      accounts.find((a) => a.id === 'raydel-alfa') || accounts[0];
-    if (demoAcc) {
-      onLoginSuccess(demoAcc);
     }
   };
 
@@ -182,8 +182,8 @@ export default function AuthScreen({
                 </strong>
                 <p>
                   {lang === 'es'
-                    ? 'Más de 65 ejercicios con diagrama corporal frontal/posterior, cálculo de 1RM, volumen semanal y récords en tiempo real.'
-                    : '65+ exercises with interactive front/back body heatmap, 1RM tracking, weekly volume charts, and real-time PR trophies.'}
+                    ? 'Más de 50 ejercicios con diagrama corporal frontal/posterior, cálculo de 1RM, volumen semanal y récords en tiempo real.'
+                    : '50+ exercises with interactive front/back body heatmap, 1RM tracking, weekly volume charts, and real-time PR trophies.'}
                 </p>
               </div>
             </div>
@@ -193,52 +193,20 @@ export default function AuthScreen({
               <div>
                 <strong>
                   {lang === 'es'
-                    ? 'Calculadora Visual de Discos + Sincronización GitHub'
-                    : 'Visual Barbell Plate Calculator + 100% GitHub Sync'}
+                    ? 'Datos 100% Privados en tu Dispositivo + Gist Cifrado'
+                    : '100% Private On-Device Data + Encrypted GitHub Sync'}
                 </strong>
                 <p>
                   {lang === 'es'
-                    ? 'Visualiza qué discos cargar por lado (lbs/kg), series de aproximación, medidas corporales y respaldo directo en GitHub.'
-                    : 'See exact plates per side (lbs/kg), warm-up generator, body measurements, and private GitHub Gist cloud sync.'}
+                    ? 'Tus entrenamientos nunca son públicos: viven en la memoria privada de tu iPhone y se sincronizan solo con tu Token personal.'
+                    : 'Your workouts are never public: they stay in your device storage and sync privately via your personal token.'}
                 </p>
               </div>
             </div>
           </div>
-
-          {accounts.length > 0 && (
-            <div className="saved-accounts-card">
-              <div className="saved-accounts-header">
-                <Trophy size={14} className="text-amber" />
-                <span>{t.auth.savedAccountsTitle}</span>
-              </div>
-              <div className="saved-accounts-grid">
-                {accounts.map((acc) => (
-                  <button
-                    key={acc.id}
-                    type="button"
-                    className="saved-account-chip"
-                    onClick={() => onLoginSuccess(acc)}
-                  >
-                    <div className="avatar-circle">
-                      {acc.name.charAt(0).toUpperCase()}
-                    </div>
-                    <div className="saved-acc-meta">
-                      <span className="saved-acc-name">{acc.name}</span>
-                      <span className="saved-acc-sub">
-                        <Flame size={12} className="inline-icon text-amber" />{' '}
-                        {acc.preferredUnit?.toUpperCase() || 'LBS'} •{' '}
-                        {t.auth.switchAccount}
-                      </span>
-                    </div>
-                    <ArrowRight size={15} className="chip-arrow" />
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
-        {/* Right Auth Card */}
+        {/* Right Strict Private Access Card */}
         <div className="auth-card">
           <div className="auth-tabs">
             <button
@@ -305,7 +273,6 @@ export default function AuthScreen({
                   onChange={(e) => setIdentifier(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder={t.auth.emailPlaceholder}
-                  autoFocus
                 />
               </div>
             </div>
@@ -320,6 +287,7 @@ export default function AuthScreen({
                   onChange={(e) => setPassword(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder={t.auth.passwordPlaceholder}
+                  autoFocus
                 />
               </div>
             </div>
@@ -382,19 +350,6 @@ export default function AuthScreen({
 
             <div className="enter-key-hint">{t.auth.enterHint}</div>
           </form>
-
-          <div className="auth-divider">
-            <span>O / OR</span>
-          </div>
-
-          <button
-            type="button"
-            className="auth-demo-btn"
-            onClick={handleQuickDemo}
-          >
-            <Dumbbell size={16} />
-            <span>{t.auth.quickDemoButton}</span>
-          </button>
         </div>
       </div>
 

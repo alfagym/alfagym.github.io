@@ -31,7 +31,7 @@ import CloudSyncModal from './components/CloudSyncModal';
 import './App.css';
 
 /* global __BUILD_TIMESTAMP__ */
-const FALLBACK_TIMESTAMP = '11:10 PM - 11/06/2026';
+const FALLBACK_TIMESTAMP = '11:18 PM - 11/06/2026';
 const BUILD_TIMESTAMP =
   typeof __BUILD_TIMESTAMP__ !== 'undefined'
     ? __BUILD_TIMESTAMP__
@@ -116,7 +116,14 @@ export default function App() {
       const saved = localStorage.getItem('alfa_gym_routines');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const hevyDefaults = DEFAULT_ROUTINES.filter(
+            (dr) =>
+              dr.id.startsWith('routine-hevy-') &&
+              !parsed.some((p) => p.id === dr.id)
+          );
+          return [...hevyDefaults, ...parsed];
+        }
       }
     } catch {
       // ignore

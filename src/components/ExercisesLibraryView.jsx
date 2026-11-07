@@ -262,6 +262,21 @@ export default function ExercisesLibraryView({
               </div>
             )}
 
+            {selectedExercise.videoUrl && (
+              <div className="ex-demo-video-box">
+                <video
+                  key={selectedExercise.videoUrl}
+                  src={selectedExercise.videoUrl}
+                  poster={selectedExercise.thumbnailUrl || undefined}
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  className="ex-demo-video"
+                />
+              </div>
+            )}
+
             {/* Personal Records Strip */}
             <div className="ex-pr-strip">
               <div className="ex-pr-card">

@@ -221,6 +221,13 @@ export default function RoutinesView({
                   return (
                     <div key={idx} className="routine-ex-line">
                       <span className="routine-ex-name">
+                        {exObj?.thumbnailUrl && (
+                          <img
+                            src={exObj.thumbnailUrl}
+                            alt=""
+                            className="routine-line-thumb"
+                          />
+                        )}
                         <strong>{exItem.sets?.length || 3}×</strong>{' '}
                         {getExName(exObj)}
                       </span>

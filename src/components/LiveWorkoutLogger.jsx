@@ -764,22 +764,31 @@ export default function LiveWorkoutLogger({
               >
                 {/* Exercise Card Header */}
                 <div className="live-ex-card-header">
-                  <div className="live-ex-title-group">
-                    {exItem.supersetGroup && (
-                      <span
-                        className={`superset-badge group-${exItem.supersetGroup}`}
-                      >
-                        {t.workout.supersetToggle} {exItem.supersetGroup}
-                      </span>
+                  <div className="live-ex-title-with-thumb">
+                    {exObj.thumbnailUrl && (
+                      <img
+                        src={exObj.thumbnailUrl}
+                        alt={getExName(exObj)}
+                        className="hevy-ex-thumb"
+                      />
                     )}
-                    <h3>{getExName(exObj)}</h3>
-                    <div className="live-ex-tags">
-                      <span className="muscle-tag">
-                        {t.muscles[exObj.primaryMuscle] || exObj.primaryMuscle}
-                      </span>
-                      <span className="equip-tag">
-                        {t.equipment[exObj.equipment] || exObj.equipment}
-                      </span>
+                    <div className="live-ex-title-group">
+                      {exItem.supersetGroup && (
+                        <span
+                          className={`superset-badge group-${exItem.supersetGroup}`}
+                        >
+                          {t.workout.supersetToggle} {exItem.supersetGroup}
+                        </span>
+                      )}
+                      <h3>{getExName(exObj)}</h3>
+                      <div className="live-ex-tags">
+                        <span className="muscle-tag">
+                          {t.muscles[exObj.primaryMuscle] || exObj.primaryMuscle}
+                        </span>
+                        <span className="equip-tag">
+                          {t.equipment[exObj.equipment] || exObj.equipment}
+                        </span>
+                      </div>
                     </div>
                   </div>
 

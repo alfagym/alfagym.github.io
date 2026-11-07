@@ -31,7 +31,7 @@ import CloudSyncModal from './components/CloudSyncModal';
 import './App.css';
 
 /* global __BUILD_TIMESTAMP__ */
-const FALLBACK_TIMESTAMP = '10:34 PM - 11/06/2026';
+const FALLBACK_TIMESTAMP = '10:44 PM - 11/06/2026';
 const BUILD_TIMESTAMP =
   typeof __BUILD_TIMESTAMP__ !== 'undefined'
     ? __BUILD_TIMESTAMP__

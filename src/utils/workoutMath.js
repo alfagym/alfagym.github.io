@@ -228,6 +228,16 @@ export function calculateWarmupSets(workingWeight, barWeight = 45, unit = 'lbs')
   ];
 }
 
+// Net workout elapsed seconds discounting all paused intervals
+export function computeWorkoutElapsedSeconds(workout, now = Date.now()) {
+  if (!workout || !workout.startedAt) return 0;
+  const totalPausedMs = Number(workout.totalPausedMs) || 0;
+  const effectiveNow =
+    workout.isPaused && workout.pausedAt ? workout.pausedAt : now;
+  const netMs = Math.max(0, effectiveNow - workout.startedAt - totalPausedMs);
+  return Math.floor(netMs / 1000);
+}
+
 // Synthesized Boxing Ring Bell & Resilient PWA Audio Engine
 export {
   playGymSound,

@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import confetti from 'canvas-confetti';
 import {
   Play,
+  Pause,
   Plus,
   Check,
   Trash2,
@@ -34,6 +35,7 @@ import {
   calculatePlateBreakdown,
   playGymSound,
   unlockGymAudio,
+  computeWorkoutElapsedSeconds,
 } from '../utils/workoutMath';
 import ExerciseMediaModal from './ExerciseMediaModal';
 
@@ -47,6 +49,7 @@ export default function LiveWorkoutLogger({
   activeWorkout,
   setActiveWorkout,
   elapsedSeconds,
+  onTogglePauseWorkout,
   restTimer,
   startRestTimer,
   adjustRestTimer,
@@ -200,6 +203,11 @@ export default function LiveWorkoutLogger({
     let isNewPR = false;
 
     if (willComplete) {
+      // Auto-resume workout stopwatch if the user checks off a set while paused
+      if (activeWorkout.isPaused && onTogglePauseWorkout) {
+        onTogglePauseWorkout();
+      }
+
       const wLbs = Number(currentSet.weight) || 0;
       const reps = Number(currentSet.reps) || 0;
       const est1RM = calculate1RM(wLbs, reps);
@@ -396,7 +404,10 @@ export default function LiveWorkoutLogger({
         (lang === 'es' ? 'Entrenamiento Alfa Gym' : 'Alfa Gym Workout'),
       routineId: activeWorkout.routineId || null,
       date: new Date().toISOString(),
-      durationSeconds: Math.max(60, elapsedSeconds),
+      durationSeconds: Math.max(
+        60,
+        computeWorkoutElapsedSeconds(activeWorkout)
+      ),
       totalVolumeLbs: finalVolumeLbs,
       totalSets: finalSets,
       prCount: prList.length,
@@ -694,20 +705,31 @@ export default function LiveWorkoutLogger({
   // ================= VIEW 2: ACTIVE LIVE WORKOUT LOGGER =================
   let normalSetCounter = 0;
 
+  const isPaused = Boolean(activeWorkout.isPaused);
+
   return (
     <div className="live-workout-container">
-      {/* Sticky Hevy Top Bar */}
-      <div className="live-workout-header-bar">
+      {/* Fixed Top Panel (Outside Scroll Area) */}
+      <div
+        className={`live-workout-header-bar ${isPaused ? 'is-paused' : ''}`}
+      >
         <div className="live-title-col">
-          <input
-            type="text"
-            className="live-workout-title-input"
-            value={activeWorkout.name}
-            onChange={(e) =>
-              setActiveWorkout((prev) => ({ ...prev, name: e.target.value }))
-            }
-            placeholder={t.workout.workoutNamePlaceholder}
-          />
+          <div className="live-title-row-inline">
+            <input
+              type="text"
+              className="live-workout-title-input"
+              value={activeWorkout.name}
+              onChange={(e) =>
+                setActiveWorkout((prev) => ({ ...prev, name: e.target.value }))
+              }
+              placeholder={t.workout.workoutNamePlaceholder}
+            />
+            {isPaused && (
+              <span className="paused-status-badge">
+                ⏸ {t.workout.pausedBadge}
+              </span>
+            )}
+          </div>
           <input
             type="text"
             className="live-workout-notes-input"
@@ -720,11 +742,21 @@ export default function LiveWorkoutLogger({
         </div>
 
         <div className="live-metrics-strip">
-          <div className="live-metric-pill">
-            <Clock size={14} className="text-blue" />
+          <div
+            className={`live-metric-pill ${
+              isPaused ? 'paused-clock-pill' : ''
+            }`}
+          >
+            {isPaused ? (
+              <Pause size={14} className="text-amber" />
+            ) : (
+              <Clock size={14} className="text-blue" />
+            )}
             <div>
               <span className="m-label">{t.workout.duration}</span>
-              <strong className="m-val font-mono">{formatClock(elapsedSeconds)}</strong>
+              <strong className="m-val font-mono">
+                {formatClock(elapsedSeconds)}
+              </strong>
             </div>
           </div>
 
@@ -733,7 +765,10 @@ export default function LiveWorkoutLogger({
             <div>
               <span className="m-label">{t.workout.volume}</span>
               <strong className="m-val">
-                {formatWeightValue(liveStats.totalVolumeLbs, unit).toLocaleString()}{' '}
+                {formatWeightValue(
+                  liveStats.totalVolumeLbs,
+                  unit
+                ).toLocaleString()}{' '}
                 {unit}
               </strong>
             </div>
@@ -761,6 +796,28 @@ export default function LiveWorkoutLogger({
         </div>
 
         <div className="live-header-actions">
+          {onTogglePauseWorkout && (
+            <button
+              type="button"
+              className={`pause-workout-btn ${
+                isPaused ? 'resume-mode' : ''
+              }`}
+              onClick={onTogglePauseWorkout}
+            >
+              {isPaused ? (
+                <>
+                  <Play size={15} fill="currentColor" />
+                  <span>{t.workout.resumeWorkout}</span>
+                </>
+              ) : (
+                <>
+                  <Pause size={15} />
+                  <span>{t.workout.pauseWorkout}</span>
+                </>
+              )}
+            </button>
+          )}
+
           {onSaveActiveToRoutine && (
             <button
               type="button"
@@ -777,7 +834,7 @@ export default function LiveWorkoutLogger({
               }
             >
               <Save size={15} />
-              <span>
+              <span className="save-btn-label-desktop">
                 {routineSavedToast
                   ? lang === 'es'
                     ? '¡Rutina Guardada!'
@@ -785,6 +842,11 @@ export default function LiveWorkoutLogger({
                   : lang === 'es'
                   ? 'Guardar Rutina'
                   : 'Save Routine'}
+              </span>
+              <span className="save-btn-label-mobile">
+                {routineSavedToast
+                  ? t.workout.savedRoutineShort
+                  : t.workout.saveRoutineShort}
               </span>
             </button>
           )}
@@ -798,7 +860,7 @@ export default function LiveWorkoutLogger({
               }
             }}
           >
-            <X size={16} />
+            <X size={15} />
             <span>{t.workout.cancelWorkout}</span>
           </button>
 
@@ -807,14 +869,15 @@ export default function LiveWorkoutLogger({
             className="finish-workout-btn"
             onClick={handleCompleteWorkoutClick}
           >
-            <Check size={17} />
+            <Check size={16} />
             <span>{t.workout.finishWorkout}</span>
           </button>
         </div>
       </div>
 
-      {/* Exercise Logger Cards */}
-      <div className="live-exercises-stack">
+      {/* Dedicated Scroll Container ONLY for Exercise Cards */}
+      <div className="live-exercises-scroll-area">
+        <div className="live-exercises-stack">
         {(activeWorkout.exercises || []).length === 0 ? (
           <div className="empty-workout-placeholder">
             <Dumbbell size={40} className="text-muted" />
@@ -1225,11 +1288,16 @@ export default function LiveWorkoutLogger({
           <Plus size={19} />
           <span>{t.workout.addExercise}</span>
         </button>
+        </div>
       </div>
 
       {/* Floating Rest Timer Bar */}
       {restTimer.active && (
-        <div className="floating-rest-timer-bar">
+        <div
+          className={`floating-rest-timer-bar ${
+            restTimer.isPaused ? 'is-paused' : ''
+          }`}
+        >
           <div className="rest-timer-progress-track">
             <div
               className="rest-timer-progress-fill"
@@ -1252,12 +1320,20 @@ export default function LiveWorkoutLogger({
                   : 'Tap to preview boxing ring bell 🥊'
               }
             >
-              <Timer size={18} className="text-blue pulse-icon" />
-              <div>
+              {restTimer.isPaused ? (
+                <Pause size={17} className="text-amber shrink-0" />
+              ) : (
+                <Timer size={17} className="text-blue pulse-icon shrink-0" />
+              )}
+              <div className="rest-info-text">
                 <span className="rest-label">
-                  {t.workout.restActive} • {restTimer.exerciseName}
+                  {restTimer.isPaused
+                    ? `${t.workout.pausedBadge} • ${
+                        restTimer.exerciseName || t.workout.restTimer
+                      }`
+                    : restTimer.exerciseName || t.workout.restActive}
                 </span>
-                <strong className="rest-countdown">
+                <strong className="rest-countdown font-mono">
                   {formatClock(restTimer.remaining)}
                 </strong>
               </div>

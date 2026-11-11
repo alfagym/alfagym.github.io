@@ -24,6 +24,7 @@ import {
   unlockGymAudio,
   installGlobalAudioUnlock,
   setRestAudioKeepAlive,
+  computeWorkoutElapsedSeconds,
 } from './utils/workoutMath';
 import { pushToGitHubGist } from './utils/githubSync';
 import AuthScreen from './components/AuthScreen';
@@ -37,7 +38,7 @@ import AccountModal from './components/AccountModal';
 import './App.css';
 
 /* global __BUILD_TIMESTAMP__ */
-const FALLBACK_TIMESTAMP = '5:27 PM - 11/11/2026';
+const FALLBACK_TIMESTAMP = '5:47 PM - 11/11/2026';
 const BUILD_TIMESTAMP =
   typeof __BUILD_TIMESTAMP__ !== 'undefined'
     ? __BUILD_TIMESTAMP__
@@ -357,6 +358,8 @@ export default function App() {
   // Rest Timer State (wall-clock endTime for background/lock-screen precision)
   const [restTimer, setRestTimer] = useState({
     active: false,
+    isPaused: false,
+    pausedRemainingMs: null,
     timerId: null,
     endTime: null,
     remaining: 0,
@@ -546,31 +549,31 @@ export default function App() {
     }
   }, [activeWorkout, activeUserKey, currentUser]);
 
-  // Live Workout Stopwatch Ticker
+  // Live Workout Stopwatch Ticker (respects paused state & persisted totalPausedMs)
   useEffect(() => {
     if (!activeWorkout) {
       setElapsedSeconds(0);
       return;
     }
-    const startedAt = activeWorkout.startedAt || Date.now();
     const updateClock = () => {
-      setElapsedSeconds(
-        Math.max(0, Math.floor((Date.now() - startedAt) / 1000))
-      );
+      setElapsedSeconds(computeWorkoutElapsedSeconds(activeWorkout));
     };
     updateClock();
+    if (activeWorkout.isPaused) {
+      return undefined;
+    }
     const interval = setInterval(updateClock, 1000);
     return () => clearInterval(interval);
   }, [activeWorkout]);
 
-  // Keep iOS WebAudio warm while rest timer is actively counting down
+  // Keep iOS WebAudio warm while rest timer is actively counting down (and not paused)
   useEffect(() => {
-    setRestAudioKeepAlive(restTimer.active && bellEnabled);
-  }, [restTimer.active, bellEnabled]);
+    setRestAudioKeepAlive(restTimer.active && !restTimer.isPaused && bellEnabled);
+  }, [restTimer.active, restTimer.isPaused, bellEnabled]);
 
   // Rest Timer Ticker (wall-clock endTime + 25s background grace window, zero side-effects inside setState)
   useEffect(() => {
-    if (!restTimer.active || !restTimer.endTime) return;
+    if (!restTimer.active || restTimer.isPaused || !restTimer.endTime) return;
 
     const GRACE_MS = 25000;
     const currentTimerId = restTimer.timerId;
@@ -645,6 +648,8 @@ export default function App() {
     const cleanSec = Math.max(1, Number(seconds) || 60);
     setRestTimer({
       active: true,
+      isPaused: false,
+      pausedRemainingMs: null,
       timerId: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       endTime: Date.now() + cleanSec * 1000,
       remaining: cleanSec,
@@ -657,11 +662,42 @@ export default function App() {
     unlockGymAudio();
     setRestTimer((prev) => {
       if (!prev.active) return prev;
+      if (prev.isPaused) {
+        const basePausedMs =
+          prev.pausedRemainingMs != null
+            ? prev.pausedRemainingMs
+            : prev.remaining * 1000;
+        const nextPausedMs = basePausedMs + deltaSeconds * 1000;
+        const nextRemPaused = Math.max(0, Math.ceil(nextPausedMs / 1000));
+        if (nextRemPaused <= 0) {
+          return {
+            ...prev,
+            active: false,
+            isPaused: false,
+            pausedRemainingMs: null,
+            endTime: null,
+            remaining: 0,
+          };
+        }
+        return {
+          ...prev,
+          pausedRemainingMs: nextPausedMs,
+          remaining: nextRemPaused,
+          total: Math.max(prev.total, nextRemPaused),
+        };
+      }
       const baseEnd = prev.endTime || Date.now() + prev.remaining * 1000;
       const nextEndTime = baseEnd + deltaSeconds * 1000;
       const nextRem = Math.max(0, Math.ceil((nextEndTime - Date.now()) / 1000));
       if (nextRem <= 0) {
-        return { ...prev, active: false, endTime: null, remaining: 0 };
+        return {
+          ...prev,
+          active: false,
+          isPaused: false,
+          pausedRemainingMs: null,
+          endTime: null,
+          remaining: 0,
+        };
       }
       return {
         ...prev,
@@ -676,9 +712,68 @@ export default function App() {
     setRestTimer((prev) => ({
       ...prev,
       active: false,
+      isPaused: false,
+      pausedRemainingMs: null,
       endTime: null,
       remaining: 0,
     }));
+  };
+
+  const handleTogglePauseWorkout = () => {
+    if (!activeWorkout) return;
+    const now = Date.now();
+    const willPause = !activeWorkout.isPaused;
+
+    if (!willPause) {
+      unlockGymAudio();
+    }
+
+    setActiveWorkout((prev) => {
+      if (!prev) return prev;
+      if (willPause) {
+        return {
+          ...prev,
+          isPaused: true,
+          pausedAt: now,
+        };
+      }
+      const pauseDelta = prev.pausedAt ? Math.max(0, now - prev.pausedAt) : 0;
+      return {
+        ...prev,
+        isPaused: false,
+        pausedAt: null,
+        totalPausedMs: (Number(prev.totalPausedMs) || 0) + pauseDelta,
+      };
+    });
+
+    setRestTimer((prev) => {
+      if (!prev.active) return prev;
+      if (willPause) {
+        if (prev.isPaused) return prev;
+        const remMs = prev.endTime
+          ? Math.max(1000, prev.endTime - now)
+          : Math.max(1000, prev.remaining * 1000);
+        return {
+          ...prev,
+          isPaused: true,
+          pausedRemainingMs: remMs,
+          endTime: null,
+          remaining: Math.max(1, Math.ceil(remMs / 1000)),
+        };
+      }
+      if (!prev.isPaused) return prev;
+      const resumeMs =
+        prev.pausedRemainingMs != null
+          ? prev.pausedRemainingMs
+          : Math.max(1000, prev.remaining * 1000);
+      return {
+        ...prev,
+        isPaused: false,
+        pausedRemainingMs: null,
+        endTime: now + resumeMs,
+        remaining: Math.max(1, Math.ceil(resumeMs / 1000)),
+      };
+    });
   };
 
   const handleToggleBellSound = () => {
@@ -707,6 +802,9 @@ export default function App() {
       name:
         lang === 'es' ? 'Entrenamiento Alfa Gym' : 'Alfa Gym Session',
       startedAt: Date.now(),
+      isPaused: false,
+      pausedAt: null,
+      totalPausedMs: 0,
       notes: '',
       exercises: [],
     });
@@ -719,6 +817,9 @@ export default function App() {
       name: routine.name,
       routineId: routine.id || null,
       startedAt: Date.now(),
+      isPaused: false,
+      pausedAt: null,
+      totalPausedMs: 0,
       notes: routine.notes || '',
       exercises: (routine.exercises || []).map((ex) => ({
         exerciseId: ex.exerciseId,
@@ -894,9 +995,15 @@ export default function App() {
     );
   }
 
+  const isLiveWorkoutScreen = activeTab === 'workout' && Boolean(activeWorkout);
+
   // ================= MAIN ALFA GYM APP =================
   return (
-    <div className="alfa-app-shell">
+    <div
+      className={`alfa-app-shell ${
+        isLiveWorkoutScreen ? 'live-locked-shell' : ''
+      }`}
+    >
       {/* Top Navigation Header */}
       <header className="alfa-header">
         <div
@@ -1015,13 +1122,22 @@ export default function App() {
       {/* Active Workout Mini-Banner when browsing other tabs */}
       {activeWorkout && activeTab !== 'workout' && (
         <div
-          className="active-workout-mini-banner"
+          className={`active-workout-mini-banner ${
+            activeWorkout.isPaused ? 'is-paused' : ''
+          }`}
           onClick={() => setActiveTab('workout')}
         >
           <div className="mini-banner-left">
-            <span className="live-dot-indicator" />
+            <span
+              className={`live-dot-indicator ${
+                activeWorkout.isPaused ? 'paused' : ''
+              }`}
+            />
             <strong>
-              {t.workout.activeWorkoutBanner}: {activeWorkout.name}
+              {activeWorkout.isPaused
+                ? `⏸ ${t.workout.pausedBadge}`
+                : t.workout.activeWorkoutBanner}
+              : {activeWorkout.name}
             </strong>
             <span className="font-mono">({formatClock(elapsedSeconds)})</span>
             {restTimer.active && (
@@ -1046,6 +1162,7 @@ export default function App() {
             activeWorkout={activeWorkout}
             setActiveWorkout={setActiveWorkout}
             elapsedSeconds={elapsedSeconds}
+            onTogglePauseWorkout={handleTogglePauseWorkout}
             restTimer={restTimer}
             startRestTimer={startRestTimer}
             adjustRestTimer={adjustRestTimer}

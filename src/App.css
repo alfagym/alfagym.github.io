@@ -514,6 +514,28 @@
   padding-bottom: 80px;
 }
 
+.alfa-app-shell.live-locked-shell {
+  height: 100vh;
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+  padding-bottom: 0;
+}
+
+.alfa-app-shell.live-locked-shell .alfa-header {
+  flex-shrink: 0;
+  position: relative;
+}
+
+.alfa-app-shell.live-locked-shell .alfa-main-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 14px 18px 0;
+}
+
 .alfa-header {
   position: sticky;
   top: 0;
@@ -640,6 +662,11 @@
   align-items: center;
 }
 
+.live-dot-indicator.paused {
+  background: #f59e0b;
+  box-shadow: 0 0 8px #f59e0b;
+}
+
 /* Active workout sticky banner when on other tabs */
 .active-workout-mini-banner {
   background: linear-gradient(90deg, rgba(16, 185, 129, 0.2), rgba(29, 140, 248, 0.2));
@@ -649,6 +676,11 @@
   align-items: center;
   justify-content: space-between;
   cursor: pointer;
+}
+
+.active-workout-mini-banner.is-paused {
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.22), rgba(16, 21, 32, 0.92));
+  border-bottom-color: rgba(245, 158, 11, 0.5);
 }
 
 .mini-banner-left {
@@ -896,33 +928,54 @@
    ACTIVE WORKOUT LOGGER VIEW
    ========================================================================== */
 .live-workout-container {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  padding-bottom: 90px;
+  gap: 12px;
+  padding-bottom: 0;
+  overflow: hidden;
 }
 
 .live-workout-header-bar {
-  background: var(--bg-card);
+  flex-shrink: 0;
+  z-index: 30;
+  background: rgba(16, 21, 32, 0.97);
+  backdrop-filter: blur(14px);
   border: 1px solid rgba(29, 140, 248, 0.35);
   border-radius: 16px;
-  padding: 16px;
+  padding: 14px 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 14px;
   flex-wrap: wrap;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.38);
+}
+
+.live-workout-header-bar.is-paused {
+  border-color: rgba(245, 158, 11, 0.6);
+  box-shadow: 0 10px 26px rgba(245, 158, 11, 0.12);
 }
 
 .live-title-col {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
   flex: 1;
   min-width: 220px;
 }
 
+.live-title-row-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .live-workout-title-input {
+  flex: 1;
+  min-width: 0;
   background: transparent;
   border: none;
   font-size: 20px;
@@ -930,6 +983,21 @@
   color: #fff;
   outline: none;
   border-bottom: 1px dashed transparent;
+}
+
+.paused-status-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.18);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  color: #fbbf24;
 }
 
 .live-workout-title-input:focus {
@@ -961,6 +1029,15 @@
   border-radius: 11px;
 }
 
+.live-metric-pill.paused-clock-pill {
+  border-color: rgba(245, 158, 11, 0.48);
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.live-metric-pill.paused-clock-pill .m-val {
+  color: #fbbf24;
+}
+
 .live-metric-pill .m-label {
   display: block;
   font-size: 10.5px;
@@ -976,17 +1053,46 @@
 .live-header-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pause-workout-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: rgba(245, 158, 11, 0.14);
+  border: 1px solid rgba(245, 158, 11, 0.42);
+  color: #fbbf24;
+  padding: 9px 13px;
+  border-radius: 11px;
+  font-size: 13px;
+  font-weight: 700;
+  transition: all 0.16s ease;
+}
+
+.pause-workout-btn.resume-mode {
+  background: #f59e0b;
+  border-color: #f59e0b;
+  color: #1c1917;
+  font-weight: 800;
+  box-shadow: 0 6px 16px rgba(245, 158, 11, 0.32);
+}
+
+.save-btn-label-mobile {
+  display: none;
 }
 
 .finish-workout-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 7px;
   background: #10b981;
   color: #042f2e;
   border: none;
-  padding: 10px 18px;
+  padding: 10px 16px;
   border-radius: 11px;
   font-weight: 800;
   font-size: 14px;
@@ -996,6 +1102,7 @@
 .discard-workout-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 5px;
   background: rgba(239, 68, 68, 0.12);
   border: 1px solid rgba(239, 68, 68, 0.3);
@@ -1004,6 +1111,17 @@
   border-radius: 11px;
   font-size: 13px;
   font-weight: 600;
+}
+
+.live-exercises-scroll-area {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  padding-bottom: calc(150px + env(safe-area-inset-bottom, 0px));
+  padding-right: 2px;
 }
 
 .live-exercises-stack {
@@ -1421,17 +1539,25 @@
 /* Floating Rest Timer Bar */
 .floating-rest-timer-bar {
   position: fixed;
-  bottom: 72px;
+  bottom: 24px;
   left: 50%;
   transform: translateX(-50%);
-  width: min(620px, calc(100% - 28px));
-  background: rgba(16, 21, 32, 0.96);
+  width: min(620px, calc(100% - 24px));
+  background: rgba(16, 21, 32, 0.97);
   backdrop-filter: blur(14px);
-  border: 1px solid rgba(29, 140, 248, 0.5);
+  border: 1px solid rgba(29, 140, 248, 0.55);
   border-radius: 14px;
   overflow: hidden;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.65);
-  z-index: 90;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
+  z-index: 120;
+}
+
+.floating-rest-timer-bar.is-paused {
+  border-color: rgba(245, 158, 11, 0.65);
+}
+
+.floating-rest-timer-bar.is-paused .rest-timer-progress-fill {
+  background: linear-gradient(90deg, #f59e0b, #fbbf24);
 }
 
 .rest-timer-progress-track {
@@ -1447,35 +1573,49 @@
 }
 
 .rest-timer-content {
-  padding: 11px 16px;
+  padding: 10px 14px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
 }
 
 .rest-timer-info {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+}
+
+.rest-info-text {
+  min-width: 0;
+  overflow: hidden;
+  flex: 1;
 }
 
 .rest-label {
   display: block;
   font-size: 11.5px;
   color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .rest-countdown {
+  display: block;
   font-size: 18px;
   font-weight: 800;
+  line-height: 1.15;
   color: #fff;
 }
 
 .rest-timer-btns {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
 }
 
 .rest-bell-btn {
@@ -3267,6 +3407,124 @@
     padding: 14px 12px 96px;
   }
 
+  .alfa-app-shell.live-locked-shell .alfa-main-content {
+    padding: 8px 10px 0;
+  }
+
+  .live-workout-container {
+    gap: 8px;
+  }
+
+  .live-workout-header-bar {
+    padding: 10px 11px;
+    border-radius: 13px;
+    gap: 8px;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .live-title-col {
+    min-width: 0;
+    width: 100%;
+    gap: 2px;
+  }
+
+  .live-workout-title-input {
+    font-weight: 800;
+    line-height: 1.2;
+    padding: 0;
+  }
+
+  .live-workout-notes-input {
+    line-height: 1.15;
+    padding: 0;
+    opacity: 0.85;
+  }
+
+  .live-metrics-strip {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 6px;
+    scrollbar-width: none;
+  }
+
+  .live-metrics-strip::-webkit-scrollbar {
+    display: none;
+  }
+
+  .live-metric-pill {
+    flex: 1 1 0;
+    min-width: max-content;
+    padding: 5px 8px;
+    gap: 6px;
+    border-radius: 9px;
+  }
+
+  .live-metric-pill .m-label {
+    font-size: 9.5px;
+    line-height: 1.05;
+  }
+
+  .live-metric-pill .m-val {
+    font-size: 12.5px;
+    line-height: 1.15;
+  }
+
+  .live-header-actions {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+    width: 100%;
+  }
+
+  .pause-workout-btn,
+  .save-routine-live-btn,
+  .discard-workout-btn,
+  .finish-workout-btn {
+    padding: 8px 4px;
+    border-radius: 9px;
+    font-size: 11.5px;
+    gap: 4px;
+    white-space: nowrap;
+    justify-content: center;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .save-btn-label-desktop {
+    display: none;
+  }
+
+  .save-btn-label-mobile {
+    display: inline;
+  }
+
+  .live-exercises-scroll-area {
+    padding-bottom: calc(182px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .floating-rest-timer-bar {
+    bottom: calc(74px + env(safe-area-inset-bottom, 0px));
+    width: calc(100% - 16px);
+    z-index: 120;
+  }
+
+  .rest-timer-content {
+    padding: 9px 11px;
+    gap: 8px;
+  }
+
+  .rest-adj-btn {
+    padding: 6px 8px;
+    font-size: 11.5px;
+  }
+
+  .rest-skip-btn {
+    padding: 6px 10px;
+    font-size: 11.5px;
+  }
+
   .alfa-mobile-bottom-nav {
     display: flex;
     padding: 6px 8px calc(14px + env(safe-area-inset-bottom, 0px));
@@ -3302,5 +3560,35 @@
   .draft-set-row {
     grid-template-columns: 38px 1fr 1fr 56px 28px;
     gap: 5px;
+  }
+}
+
+@media (max-width: 359px) {
+  .rest-timer-content {
+    flex-wrap: wrap;
+  }
+
+  .rest-timer-btns {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+@media (max-width: 920px) and (max-height: 560px) {
+  .alfa-app-shell.live-locked-shell .alfa-mobile-bottom-nav {
+    display: none !important;
+  }
+
+  .alfa-app-shell.live-locked-shell .floating-rest-timer-bar {
+    bottom: 8px;
+  }
+
+  .alfa-app-shell.live-locked-shell .live-workout-notes-input:not(:focus) {
+    display: none;
+  }
+
+  .alfa-app-shell.live-locked-shell .alfa-header {
+    padding-top: calc(6px + env(safe-area-inset-top, 0px));
+    padding-bottom: 6px;
   }
 }

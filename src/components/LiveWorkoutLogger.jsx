@@ -20,6 +20,8 @@ import {
   FolderKanban,
   Edit3,
   Save,
+  Bell,
+  BellOff,
 } from 'lucide-react';
 import {
   calculate1RM,
@@ -31,6 +33,7 @@ import {
   getExerciseStats,
   calculatePlateBreakdown,
   playGymSound,
+  unlockGymAudio,
 } from '../utils/workoutMath';
 import ExerciseMediaModal from './ExerciseMediaModal';
 
@@ -48,6 +51,9 @@ export default function LiveWorkoutLogger({
   startRestTimer,
   adjustRestTimer,
   skipRestTimer,
+  bellEnabled = true,
+  onToggleBellSound,
+  onPreviewBellSound,
   exercisesLibrary,
   onAddCustomExercise,
   routines,
@@ -182,45 +188,52 @@ export default function LiveWorkoutLogger({
     });
   };
 
-  // Toggle set completion + check PR + trigger Rest Timer
+  // Toggle set completion + check PR + trigger Rest Timer (synchronous audio unlock for iOS PWA)
   const handleToggleSetComplete = (exIdx, setIdx) => {
+    unlockGymAudio();
+    if (!activeWorkout) return;
+    const currentEx = activeWorkout.exercises?.[exIdx];
+    const currentSet = currentEx?.sets?.[setIdx];
+    if (!currentEx || !currentSet) return;
+
+    const willComplete = !currentSet.completed;
+    let isNewPR = false;
+
+    if (willComplete) {
+      const wLbs = Number(currentSet.weight) || 0;
+      const reps = Number(currentSet.reps) || 0;
+      const est1RM = calculate1RM(wLbs, reps);
+      const histStats = getExerciseStats(workouts, currentEx.exerciseId);
+
+      isNewPR =
+        currentSet.type !== 'warmup' &&
+        wLbs > 0 &&
+        reps > 0 &&
+        (wLbs > histStats.maxWeight || est1RM > histStats.best1RM);
+
+      if (isNewPR) {
+        playGymSound('pr');
+      } else {
+        playGymSound('check');
+      }
+
+      if (currentEx.restSeconds && currentEx.restSeconds > 0) {
+        startRestTimer(
+          currentEx.restSeconds,
+          getExName(exerciseMap[currentEx.exerciseId])
+        );
+      }
+    }
+
     setActiveWorkout((prev) => {
       if (!prev) return prev;
       const nextExs = [...prev.exercises];
       const ex = { ...nextExs[exIdx], sets: [...nextExs[exIdx].sets] };
-      const targetSet = { ...ex.sets[setIdx] };
-
-      const willComplete = !targetSet.completed;
-      targetSet.completed = willComplete;
-
-      if (willComplete) {
-        const wLbs = Number(targetSet.weight) || 0;
-        const reps = Number(targetSet.reps) || 0;
-        const est1RM = calculate1RM(wLbs, reps);
-        const histStats = getExerciseStats(workouts, ex.exerciseId);
-
-        const isNewPR =
-          targetSet.type !== 'warmup' &&
-          wLbs > 0 &&
-          reps > 0 &&
-          (wLbs > histStats.maxWeight || est1RM > histStats.best1RM);
-
-        targetSet.isPR = isNewPR;
-
-        if (isNewPR) {
-          playGymSound('pr');
-        } else {
-          playGymSound('check');
-        }
-
-        if (ex.restSeconds && ex.restSeconds > 0) {
-          startRestTimer(ex.restSeconds, getExName(exerciseMap[ex.exerciseId]));
-        }
-      } else {
-        targetSet.isPR = false;
-      }
-
-      ex.sets[setIdx] = targetSet;
+      ex.sets[setIdx] = {
+        ...ex.sets[setIdx],
+        completed: willComplete,
+        isPR: willComplete ? isNewPR : false,
+      };
       nextExs[exIdx] = ex;
       return { ...prev, exercises: nextExs };
     });
@@ -1229,7 +1242,16 @@ export default function LiveWorkoutLogger({
             />
           </div>
           <div className="rest-timer-content">
-            <div className="rest-timer-info">
+            <div
+              className="rest-timer-info"
+              onClick={() => onPreviewBellSound && onPreviewBellSound()}
+              style={{ cursor: 'pointer' }}
+              title={
+                lang === 'es'
+                  ? 'Toca para escuchar la campana de ring de boxeo 🥊'
+                  : 'Tap to preview boxing ring bell 🥊'
+              }
+            >
               <Timer size={18} className="text-blue pulse-icon" />
               <div>
                 <span className="rest-label">
@@ -1242,6 +1264,24 @@ export default function LiveWorkoutLogger({
             </div>
 
             <div className="rest-timer-btns">
+              {onToggleBellSound && (
+                <button
+                  type="button"
+                  className={`rest-bell-btn ${bellEnabled ? 'active' : 'muted'}`}
+                  onClick={onToggleBellSound}
+                  title={
+                    bellEnabled
+                      ? lang === 'es'
+                        ? 'Campana de boxeo activada (toca para silenciar)'
+                        : 'Boxing bell ON (tap to mute)'
+                      : lang === 'es'
+                      ? 'Campana silenciada (toca para activar y probar)'
+                      : 'Boxing bell muted (tap to enable & test)'
+                  }
+                >
+                  {bellEnabled ? <Bell size={14} /> : <BellOff size={14} />}
+                </button>
+              )}
               <button
                 type="button"
                 className="rest-adj-btn"

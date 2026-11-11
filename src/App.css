@@ -1475,7 +1475,26 @@
 .rest-timer-btns {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
+}
+
+.rest-bell-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  background: rgba(245, 158, 11, 0.14);
+  color: #fbbf24;
+  transition: all 0.18s ease;
+}
+
+.rest-bell-btn.muted {
+  border-color: var(--border-subtle);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
 }
 
 .rest-adj-btn {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Dumbbell,
   PlayCircle,
@@ -18,7 +18,13 @@ import {
   DEFAULT_ROUTINES,
   createInitialMeasurements,
 } from './data/gymData';
-import { formatClock, playGymSound } from './utils/workoutMath';
+import {
+  formatClock,
+  playGymSound,
+  unlockGymAudio,
+  installGlobalAudioUnlock,
+  setRestAudioKeepAlive,
+} from './utils/workoutMath';
 import { pushToGitHubGist } from './utils/githubSync';
 import AuthScreen from './components/AuthScreen';
 import LiveWorkoutLogger from './components/LiveWorkoutLogger';
@@ -31,7 +37,7 @@ import AccountModal from './components/AccountModal';
 import './App.css';
 
 /* global __BUILD_TIMESTAMP__ */
-const FALLBACK_TIMESTAMP = '11:49 PM - 11/06/2026';
+const FALLBACK_TIMESTAMP = '5:27 PM - 11/11/2026';
 const BUILD_TIMESTAMP =
   typeof __BUILD_TIMESTAMP__ !== 'undefined'
     ? __BUILD_TIMESTAMP__
@@ -348,13 +354,33 @@ export default function App() {
 
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
-  // Rest Timer State
+  // Rest Timer State (wall-clock endTime for background/lock-screen precision)
   const [restTimer, setRestTimer] = useState({
     active: false,
+    timerId: null,
+    endTime: null,
     remaining: 0,
     total: 90,
     exerciseName: '',
   });
+
+  // Boxing Ring Bell sound toggle (enabled by default)
+  const [bellEnabled, setBellEnabled] = useState(() => {
+    return localStorage.getItem('alfa_gym_bell_enabled') !== 'false';
+  });
+
+  const bellEnabledRef = useRef(bellEnabled);
+  const firedTimerIdRef = useRef(null);
+
+  useEffect(() => {
+    bellEnabledRef.current = bellEnabled;
+    localStorage.setItem('alfa_gym_bell_enabled', String(bellEnabled));
+  }, [bellEnabled]);
+
+  useEffect(() => {
+    installGlobalAudioUnlock();
+    return () => setRestAudioKeepAlive(false);
+  }, []);
 
   // Switch / Load user data cleanly on login or register
   const handleSelectActiveUser = (userObj) => {
@@ -537,21 +563,67 @@ export default function App() {
     return () => clearInterval(interval);
   }, [activeWorkout]);
 
-  // Rest Timer Ticker
+  // Keep iOS WebAudio warm while rest timer is actively counting down
   useEffect(() => {
-    if (!restTimer.active) return;
-    const interval = setInterval(() => {
-      setRestTimer((prev) => {
-        if (!prev.active) return prev;
-        if (prev.remaining <= 1) {
-          playGymSound('timerDone');
-          return { ...prev, active: false, remaining: 0 };
+    setRestAudioKeepAlive(restTimer.active && bellEnabled);
+  }, [restTimer.active, bellEnabled]);
+
+  // Rest Timer Ticker (wall-clock endTime + 25s background grace window, zero side-effects inside setState)
+  useEffect(() => {
+    if (!restTimer.active || !restTimer.endTime) return;
+
+    const GRACE_MS = 25000;
+    const currentTimerId = restTimer.timerId;
+    const targetEndTime = restTimer.endTime;
+
+    const checkRestClock = () => {
+      const now = Date.now();
+      const msLeft = targetEndTime - now;
+
+      if (msLeft <= 0) {
+        const overdueMs = now - targetEndTime;
+        if (firedTimerIdRef.current !== currentTimerId) {
+          firedTimerIdRef.current = currentTimerId;
+          if (bellEnabledRef.current && overdueMs <= GRACE_MS) {
+            playGymSound('timerDone');
+          }
         }
-        return { ...prev, remaining: prev.remaining - 1 };
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [restTimer.active]);
+        setRestTimer((prev) =>
+          prev.active
+            ? { ...prev, active: false, endTime: null, remaining: 0 }
+            : prev
+        );
+        return;
+      }
+
+      const nextSec = Math.max(1, Math.ceil(msLeft / 1000));
+      setRestTimer((prev) =>
+        !prev.active || prev.remaining === nextSec
+          ? prev
+          : { ...prev, remaining: nextSec }
+      );
+    };
+
+    checkRestClock();
+    const interval = setInterval(checkRestClock, 250);
+
+    const handleWakeUp = () => {
+      if (document.visibilityState === 'visible') {
+        checkRestClock();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleWakeUp);
+    window.addEventListener('focus', checkRestClock);
+    window.addEventListener('pageshow', checkRestClock);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleWakeUp);
+      window.removeEventListener('focus', checkRestClock);
+      window.removeEventListener('pageshow', checkRestClock);
+    };
+  }, [restTimer.active, restTimer.endTime, restTimer.timerId]);
 
   const t = translations[lang] || translations.es;
 
@@ -569,22 +641,31 @@ export default function App() {
   };
 
   const startRestTimer = (seconds, exerciseName = '') => {
+    unlockGymAudio();
+    const cleanSec = Math.max(1, Number(seconds) || 60);
     setRestTimer({
       active: true,
-      remaining: seconds,
-      total: seconds,
+      timerId: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      endTime: Date.now() + cleanSec * 1000,
+      remaining: cleanSec,
+      total: cleanSec,
       exerciseName,
     });
   };
 
   const adjustRestTimer = (deltaSeconds) => {
+    unlockGymAudio();
     setRestTimer((prev) => {
-      const nextRem = Math.max(0, prev.remaining + deltaSeconds);
-      if (nextRem === 0) {
-        return { ...prev, active: false, remaining: 0 };
+      if (!prev.active) return prev;
+      const baseEnd = prev.endTime || Date.now() + prev.remaining * 1000;
+      const nextEndTime = baseEnd + deltaSeconds * 1000;
+      const nextRem = Math.max(0, Math.ceil((nextEndTime - Date.now()) / 1000));
+      if (nextRem <= 0) {
+        return { ...prev, active: false, endTime: null, remaining: 0 };
       }
       return {
         ...prev,
+        endTime: nextEndTime,
         remaining: nextRem,
         total: Math.max(prev.total, nextRem),
       };
@@ -592,7 +673,32 @@ export default function App() {
   };
 
   const skipRestTimer = () => {
-    setRestTimer((prev) => ({ ...prev, active: false, remaining: 0 }));
+    setRestTimer((prev) => ({
+      ...prev,
+      active: false,
+      endTime: null,
+      remaining: 0,
+    }));
+  };
+
+  const handleToggleBellSound = () => {
+    unlockGymAudio();
+    setBellEnabled((prev) => {
+      const next = !prev;
+      if (next) {
+        // Play boxing bell sample immediately when turning bell ON so user hears & verifies volume
+        playGymSound('timerDone');
+      }
+      return next;
+    });
+  };
+
+  const handlePreviewBellSound = () => {
+    unlockGymAudio();
+    if (!bellEnabled) {
+      setBellEnabled(true);
+    }
+    playGymSound('timerDone');
   };
 
   const handleStartEmptyWorkout = () => {
@@ -944,6 +1050,9 @@ export default function App() {
             startRestTimer={startRestTimer}
             adjustRestTimer={adjustRestTimer}
             skipRestTimer={skipRestTimer}
+            bellEnabled={bellEnabled}
+            onToggleBellSound={handleToggleBellSound}
+            onPreviewBellSound={handlePreviewBellSound}
             exercisesLibrary={fullExercisesLibrary}
             onAddCustomExercise={handleAddCustomExercise}
             routines={routines}

@@ -38,7 +38,7 @@ import AccountModal from './components/AccountModal';
 import './App.css';
 
 /* global __BUILD_TIMESTAMP__ */
-const FALLBACK_TIMESTAMP = '5:47 PM - 11/11/2026';
+const FALLBACK_TIMESTAMP = '7:57 PM - 11/11/2026';
 const BUILD_TIMESTAMP =
   typeof __BUILD_TIMESTAMP__ !== 'undefined'
     ? __BUILD_TIMESTAMP__
@@ -566,10 +566,10 @@ export default function App() {
     return () => clearInterval(interval);
   }, [activeWorkout]);
 
-  // Keep iOS WebAudio warm while rest timer is actively counting down (and not paused)
+  // Keep screen awake via Screen Wake Lock while rest timer is actively counting down (and not paused)
   useEffect(() => {
-    setRestAudioKeepAlive(restTimer.active && !restTimer.isPaused && bellEnabled);
-  }, [restTimer.active, restTimer.isPaused, bellEnabled]);
+    setRestAudioKeepAlive(restTimer.active && !restTimer.isPaused);
+  }, [restTimer.active, restTimer.isPaused]);
 
   // Rest Timer Ticker (wall-clock endTime + 25s background grace window, zero side-effects inside setState)
   useEffect(() => {
@@ -612,6 +612,7 @@ export default function App() {
 
     const handleWakeUp = () => {
       if (document.visibilityState === 'visible') {
+        setRestAudioKeepAlive(true);
         checkRestClock();
       }
     };
@@ -777,19 +778,17 @@ export default function App() {
   };
 
   const handleToggleBellSound = () => {
-    unlockGymAudio();
-    setBellEnabled((prev) => {
-      const next = !prev;
-      if (next) {
-        // Play boxing bell sample immediately when turning bell ON so user hears & verifies volume
-        playGymSound('timerDone');
-      }
-      return next;
-    });
+    const next = !bellEnabled;
+    setBellEnabled(next);
+    if (next) {
+      // Play boxing bell sample immediately when turning bell ON so user hears & verifies volume in Silent Mode
+      playGymSound('timerDone');
+    } else {
+      unlockGymAudio();
+    }
   };
 
   const handlePreviewBellSound = () => {
-    unlockGymAudio();
     if (!bellEnabled) {
       setBellEnabled(true);
     }

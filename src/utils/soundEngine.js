@@ -1,52 +1,57 @@
 // Physical Modal Synthesis Boxing Ring Bell & Resilient iOS PWA Audio Engine
-// Zero external network assets required — works 100% offline & through iOS Silent Switch
+// Zero external network assets required — works 100% offline & through iOS Vibrate-Only / Silent Mode
 
 const SAMPLE_RATE = 44100;
+const SILENT_LEAD_IN_SEC = 0.25; // 250ms pure 0x0000 PCM16 silence for click-free muted=false iOS gesture blessing
 const BELL_DURATION_SEC = 2.65;
 const FUNDAMENTAL_HZ = 816; // Heavy cast-bronze boxing ring bell (~G#5)
 
 const STRIKE_TIMES_SEC = [0.0, 0.26, 0.52];
-const STRIKE_VELOCITIES = [0.9, 0.94, 1.0];
+const STRIKE_VELOCITIES = [0.92, 0.96, 1.0];
 
 // 11 inharmonic modal partials + close modal-splitting pairs for natural bronze shimmer
 const BOXING_BELL_MODES = [
   { ratio: 0.5, amp: 0.28, decay: 2.05 }, // Hum tone (heavy bronze mass)
-  { ratio: 1.0, amp: 0.78, decay: 1.72 }, // Prime Fundamental A (816 Hz)
-  { ratio: 1.0048, amp: 0.5, decay: 1.58 }, // Prime Detune B (+3.9 Hz warble)
-  { ratio: 1.204, amp: 0.54, decay: 1.22 }, // Minor Tierce (signature bell interval)
-  { ratio: 1.518, amp: 0.38, decay: 0.9 }, // Inharmonic Quint
-  { ratio: 2.008, amp: 0.58, decay: 0.72 }, // Nominal Octave A
-  { ratio: 2.0155, amp: 0.34, decay: 0.62 }, // Nominal Detune B (+6.1 Hz shimmer)
-  { ratio: 2.574, amp: 0.34, decay: 0.44 }, // Superquint
-  { ratio: 3.09, amp: 0.26, decay: 0.28 }, // Brass edge bite
-  { ratio: 4.06, amp: 0.18, decay: 0.16 }, // High metallic clang
-  { ratio: 5.38, amp: 0.11, decay: 0.085 }, // Rim ping
+  { ratio: 1.0, amp: 0.8, decay: 1.72 }, // Prime Fundamental A (816 Hz)
+  { ratio: 1.0048, amp: 0.52, decay: 1.58 }, // Prime Detune B (+3.9 Hz warble)
+  { ratio: 1.204, amp: 0.56, decay: 1.22 }, // Minor Tierce (signature bell interval)
+  { ratio: 1.518, amp: 0.4, decay: 0.9 }, // Inharmonic Quint
+  { ratio: 2.008, amp: 0.6, decay: 0.72 }, // Nominal Octave A
+  { ratio: 2.0155, amp: 0.35, decay: 0.62 }, // Nominal Detune B (+6.1 Hz shimmer)
+  { ratio: 2.574, amp: 0.35, decay: 0.44 }, // Superquint
+  { ratio: 3.09, amp: 0.27, decay: 0.28 }, // Brass edge bite
+  { ratio: 4.06, amp: 0.19, decay: 0.16 }, // High metallic clang
+  { ratio: 5.38, amp: 0.12, decay: 0.085 }, // Rim ping
 ];
 
 let sharedAudioCtx = null;
+let uiCtxSuspendTimer = null;
 let cachedBellSamples = null;
 let cachedBellAudioBuffer = null;
-let cachedBellWavUrl = null;
-let cachedSilentWavUri = null;
+let cachedBellWavDataUri = null;
+
 let bellAudioEl = null;
 let bellAudioUnlocked = false;
-let keepAliveNodes = null;
-let sessionResetToken = 0;
+let bellUnlockInFlight = false;
+let needsReprimeAfterBackground = false;
+let isBellCurrentlyRinging = false;
+let activeRingToken = 0;
+let cleanupRingTimeoutId = null;
+
+let wakeLockSentinel = null;
+let wakeLockDesired = false;
 let globalUnlockInstalled = false;
 
-function isIOSDevice() {
-  if (typeof navigator === 'undefined') return false;
-  const ua = navigator.userAgent || '';
-  return (
-    /iPad|iPhone|iPod/.test(ua) ||
-    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-  );
-}
-
 function setAudioSessionTypeSafe(type) {
-  if (typeof navigator !== 'undefined' && 'audioSession' in navigator && navigator.audioSession) {
+  if (
+    typeof navigator !== 'undefined' &&
+    'audioSession' in navigator &&
+    navigator.audioSession
+  ) {
     try {
-      navigator.audioSession.type = type;
+      if (navigator.audioSession.type !== type) {
+        navigator.audioSession.type = type;
+      }
       return true;
     } catch {
       return false;
@@ -55,9 +60,28 @@ function setAudioSessionTypeSafe(type) {
   return false;
 }
 
-function encodePcm16WavBytes(floatSamples, sampleRate) {
-  const numSamples = floatSamples.length;
-  const dataSize = numSamples * 2;
+function releasePlaybackSessionToAuto() {
+  // Explicitly step 'playback' -> 'ambient' -> 'auto' so WebKit GPUProcess drops
+  // AVAudioSessionCategoryPlayback immediately without leaving an 'ambient' override locked
+  setAudioSessionTypeSafe('ambient');
+  setAudioSessionTypeSafe('auto');
+}
+
+function uint8ToBase64(bytes) {
+  const CHUNK_SIZE = 0x2000; // 8192-byte chunks avoid JS call-stack limits
+  const chunks = [];
+  for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+    chunks.push(
+      String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK_SIZE))
+    );
+  }
+  return btoa(chunks.join(''));
+}
+
+function encodeBellWavWithLeadInDataUri(bellFloatSamples, sampleRate) {
+  const leadInSamples = Math.floor(sampleRate * SILENT_LEAD_IN_SEC);
+  const totalSamples = leadInSamples + bellFloatSamples.length;
+  const dataSize = totalSamples * 2;
   const buffer = new ArrayBuffer(44 + dataSize);
   const view = new DataView(buffer);
 
@@ -72,38 +96,27 @@ function encodePcm16WavBytes(floatSamples, sampleRate) {
   writeStr(8, 'WAVE');
   writeStr(12, 'fmt ');
   view.setUint32(16, 16, true); // PCM chunk size
-  view.setUint16(20, 1, true); // PCM format = 1
+  view.setUint16(20, 1, true); // Linear PCM = 1
   view.setUint16(22, 1, true); // Mono = 1 channel
   view.setUint32(24, sampleRate, true);
   view.setUint32(28, sampleRate * 2, true); // Byte rate
   view.setUint16(32, 2, true); // Block align
-  view.setUint16(34, 16, true); // Bits per sample
+  view.setUint16(34, 16, true); // 16 bits per sample
   writeStr(36, 'data');
   view.setUint32(40, dataSize, true);
 
-  let offset = 44;
-  for (let i = 0; i < numSamples; i++) {
-    const clamped = Math.max(-1, Math.min(1, floatSamples[i]));
+  // Samples [0 .. leadInSamples - 1] remain zero-initialized (0x0000 pure digital silence)
+  let offset = 44 + leadInSamples * 2;
+  for (let i = 0; i < bellFloatSamples.length; i++) {
+    // 1.5ms (66-sample) micro-ramp at strike boundary guarantees zero DC click when seeking to 0.25s
+    const ramp = i < 66 ? i / 66 : 1;
+    const clamped = Math.max(-1, Math.min(1, bellFloatSamples[i] * ramp));
     const int16 = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
     view.setInt16(offset, int16 | 0, true);
     offset += 2;
   }
 
-  return buffer;
-}
-
-function getSilentWavDataUri() {
-  if (cachedSilentWavUri) return cachedSilentWavUri;
-  // 40 ms of digital silence (0 amplitude) to bless HTMLAudioElement without any audible click
-  const silentSamples = new Float32Array(Math.floor(SAMPLE_RATE * 0.04));
-  const wavBuffer = encodePcm16WavBytes(silentSamples, SAMPLE_RATE);
-  const bytes = new Uint8Array(wavBuffer);
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  cachedSilentWavUri = `data:audio/wav;base64,${btoa(binary)}`;
-  return cachedSilentWavUri;
+  return `data:audio/wav;base64,${uint8ToBase64(new Uint8Array(buffer))}`;
 }
 
 /**
@@ -169,8 +182,7 @@ export function getBoxingBellSamples() {
       n === strikeSampleIndices[nextStrikePtr]
     ) {
       const vel = STRIKE_VELOCITIES[nextStrikePtr];
-      // If the bell is already vibrating, physical contact of the steel hammer
-      // partially damps previous ring (especially upper modes) before re-exciting
+      // Physical contact of the steel hammer partially damps previous ring before re-exciting
       if (nextStrikePtr > 0) {
         for (let m = 0; m < numModes; m++) {
           const damp = m < 5 ? 0.34 : 0.18;
@@ -180,7 +192,6 @@ export function getBoxingBellSamples() {
       }
       for (let m = 0; m < numModes; m++) {
         const amp = BOXING_BELL_MODES[m].amp * vel;
-        // Slight modal phase spread prevents artificial digital click alignment
         const initPhase = m * 0.37 + nextStrikePtr * 0.21;
         u[m] += amp * Math.cos(initPhase);
         v[m] += amp * Math.sin(initPhase);
@@ -206,7 +217,7 @@ export function getBoxingBellSamples() {
     if (samplesSinceStrike < 800) {
       const tStrike = samplesSinceStrike / SAMPLE_RATE;
 
-      // 1) Bandpass metallic clack burst (12 ms decay)
+      // 1) Bandpass metallic clack burst (11 ms decay)
       rngState = (rngState * 1664525 + 1013904223) >>> 0;
       const white = (rngState / 2147483648 - 1) * Math.exp(-tStrike / 0.011);
       const bpOut =
@@ -221,22 +232,22 @@ export function getBoxingBellSamples() {
       clapperPhase += (2 * Math.PI * sweepFreq) / SAMPLE_RATE;
       const knock = Math.sin(clapperPhase) * Math.exp(-tStrike / 0.0065);
 
-      transient = (bpOut * 0.95 + knock * 0.48) * activeStrikeVel;
+      transient = (bpOut * 0.98 + knock * 0.5) * activeStrikeVel;
       samplesSinceStrike++;
     }
 
-    const rawMix = bellSum * 0.48 + transient;
+    const rawMix = bellSum * 0.5 + transient;
 
     // 165 Hz High-Pass Filter
     const hpOut = hpAlpha * (hpPrevOut + rawMix - hpPrevIn);
     hpPrevIn = rawMix;
     hpPrevOut = hpOut;
 
-    // Warm analog-style soft saturation
-    out[n] = Math.tanh(hpOut * 1.62);
+    // Warm analog-style soft saturation for loud phone speaker projection
+    out[n] = Math.tanh(hpOut * 1.75);
   }
 
-  // Smooth 65 ms fade-out at the very end + peak normalization to -0.4 dBFS (0.955)
+  // Smooth 65 ms fade-out at the very end + peak normalization to 0.98 (-0.17 dBFS)
   const fadeSamples = Math.floor(SAMPLE_RATE * 0.065);
   let maxPeak = 0.001;
   for (let n = 0; n < totalSamples; n++) {
@@ -248,7 +259,7 @@ export function getBoxingBellSamples() {
     if (abs > maxPeak) maxPeak = abs;
   }
 
-  const normGain = 0.955 / maxPeak;
+  const normGain = 0.98 / maxPeak;
   for (let n = 0; n < totalSamples; n++) {
     out[n] *= normGain;
   }
@@ -257,13 +268,11 @@ export function getBoxingBellSamples() {
   return out;
 }
 
-function getBoxingBellWavUrl() {
-  if (cachedBellWavUrl) return cachedBellWavUrl;
+function getBoxingBellWavDataUri() {
+  if (cachedBellWavDataUri) return cachedBellWavDataUri;
   const samples = getBoxingBellSamples();
-  const wavBuffer = encodePcm16WavBytes(samples, SAMPLE_RATE);
-  const blob = new Blob([wavBuffer], { type: 'audio/wav' });
-  cachedBellWavUrl = URL.createObjectURL(blob);
-  return cachedBellWavUrl;
+  cachedBellWavDataUri = encodeBellWavWithLeadInDataUri(samples, SAMPLE_RATE);
+  return cachedBellWavDataUri;
 }
 
 function getOrCreateAudioContext() {
@@ -274,17 +283,6 @@ function getOrCreateAudioContext() {
     sharedAudioCtx = new AudioCtx();
   }
   return sharedAudioCtx;
-}
-
-function getOrCreateBellAudioElement() {
-  if (typeof window === 'undefined' || typeof Audio === 'undefined') return null;
-  if (!bellAudioEl) {
-    bellAudioEl = new Audio();
-    bellAudioEl.preload = 'auto';
-    bellAudioEl.playsInline = true;
-    bellAudioEl.src = getSilentWavDataUri();
-  }
-  return bellAudioEl;
 }
 
 function getBoxingBellAudioBuffer(ctx) {
@@ -298,47 +296,175 @@ function getBoxingBellAudioBuffer(ctx) {
   return buffer;
 }
 
+function finishBellSession(token) {
+  if (token !== undefined && token !== activeRingToken) return;
+  isBellCurrentlyRinging = false;
+  if (cleanupRingTimeoutId) {
+    clearTimeout(cleanupRingTimeoutId);
+    cleanupRingTimeoutId = null;
+  }
+  if (bellAudioEl) {
+    try {
+      if (!bellAudioEl.paused) {
+        bellAudioEl.pause();
+      }
+      if (bellAudioEl.readyState >= 1) {
+        bellAudioEl.currentTime = SILENT_LEAD_IN_SEC;
+      }
+    } catch {
+      // ignore seek errors
+    }
+  }
+  releasePlaybackSessionToAuto();
+}
+
+function ensureBellAudioElement() {
+  if (typeof window === 'undefined' || typeof Audio === 'undefined') return null;
+  if (bellAudioEl && !bellAudioEl.error) return bellAudioEl;
+
+  // Immutable Base64 WAV Data URI: immune to iOS Home Screen PWA BlobRegistry eviction
+  const el = new Audio(getBoxingBellWavDataUri());
+  el.preload = 'auto';
+  el.playsInline = true;
+  el.volume = 1.0;
+  // MUST remain false so WebKit clears RequireUserGestureForAudioRateChange on unlock
+  el.muted = false;
+
+  el.addEventListener('timeupdate', () => {
+    // Hard safety guard: during silent gesture unlock, never allow playhead past 120ms of the 250ms silent lead-in
+    if (bellUnlockInFlight && !isBellCurrentlyRinging && el.currentTime >= 0.12) {
+      el.pause();
+    }
+  });
+
+  el.addEventListener('ended', () => {
+    finishBellSession(activeRingToken);
+  });
+
+  bellAudioEl = el;
+  bellAudioUnlocked = false;
+  return bellAudioEl;
+}
+
+async function acquireWakeLockSafe() {
+  if (!wakeLockDesired || wakeLockSentinel) return;
+  if (typeof navigator === 'undefined' || !('wakeLock' in navigator) || !navigator.wakeLock) {
+    return;
+  }
+  if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+    return;
+  }
+  try {
+    const sentinel = await navigator.wakeLock.request('screen');
+    if (!wakeLockDesired) {
+      try {
+        await sentinel.release();
+      } catch {
+        // ignore
+      }
+      return;
+    }
+    wakeLockSentinel = sentinel;
+    sentinel.addEventListener('release', () => {
+      if (wakeLockSentinel === sentinel) {
+        wakeLockSentinel = null;
+      }
+    });
+  } catch {
+    // Low Power Mode or restricted context may decline Screen Wake Lock; non-fatal
+  }
+}
+
+async function releaseWakeLockSafe() {
+  const current = wakeLockSentinel;
+  wakeLockSentinel = null;
+  if (current) {
+    try {
+      await current.release();
+    } catch {
+      // ignore
+    }
+  }
+}
+
 /**
- * Must be called synchronously inside user gesture handlers (onClick / pointerdown / touchend).
- * Warms up both the singleton AudioContext and the fallback HTMLAudioElement completely silently.
+ * Called synchronously inside user gesture handlers (touchend / click / keydown).
+ * Blesses the persistent HTMLAudioElement using its 250ms 0x0000 silent lead-in under 'ambient'
+ * so Spotify/Apple Music is NEVER interrupted on set checkmarks, then parks at 0.25s in 'auto'.
  */
 export function unlockGymAudio() {
   try {
-    setAudioSessionTypeSafe('ambient');
-
-    const ctx = getOrCreateAudioContext();
-    if (ctx) {
-      if (ctx.state === 'suspended' || ctx.state === 'interrupted') {
-        ctx.resume().catch(() => {});
-      }
-      // Play a 1-sample silent buffer to unlock iOS WebKit WebAudio output
-      const silentBuf = ctx.createBuffer(1, 1, 22050);
-      const src = ctx.createBufferSource();
-      src.buffer = silentBuf;
-      src.connect(ctx.destination);
-      src.start(0);
-      // Pre-warm the synthesized boxing bell buffer in RAM
-      getBoxingBellSamples();
+    if (wakeLockDesired && !wakeLockSentinel) {
+      acquireWakeLockSafe();
     }
 
-    const el = getOrCreateBellAudioElement();
-    if (el && !bellAudioUnlocked) {
-      el.muted = false;
-      const playPromise = el.play();
-      if (playPromise && typeof playPromise.then === 'function') {
-        playPromise
-          .then(() => {
-            el.pause();
-            el.currentTime = 0;
-            el.src = getBoxingBellWavUrl();
-            el.load();
-            bellAudioUnlocked = true;
-          })
-          .catch(() => {});
+    const el = ensureBellAudioElement();
+    if (!el) return;
+
+    // Never collide with an active bell ring or an already in-flight unlock
+    if (isBellCurrentlyRinging || bellUnlockInFlight) return;
+
+    const shouldPrime =
+      !bellAudioUnlocked ||
+      needsReprimeAfterBackground ||
+      el.error !== null ||
+      el.readyState < 1;
+
+    if (!shouldPrime) return;
+
+    const ringAtStart = activeRingToken;
+    bellUnlockInFlight = true;
+
+    // Use 'ambient' ONLY during the ~20ms silent 0x0000 blessing so Spotify never pauses on tap
+    setAudioSessionTypeSafe('ambient');
+    el.muted = false;
+    el.volume = 1.0;
+
+    try {
+      el.currentTime = 0;
+    } catch {
+      // ignore if metadata is still parsing
+    }
+
+    const playPromise = el.play();
+    if (playPromise && typeof playPromise.then === 'function') {
+      playPromise
+        .then(() => {
+          bellUnlockInFlight = false;
+          bellAudioUnlocked = true;
+          needsReprimeAfterBackground = false;
+          // Abort cleanup if playBoxingRingBell() took over while unlock promise was resolving
+          if (ringAtStart !== activeRingToken || isBellCurrentlyRinging) {
+            return;
+          }
+          el.pause();
+          try {
+            if (el.readyState >= 1) {
+              el.currentTime = SILENT_LEAD_IN_SEC;
+            }
+          } catch {
+            // ignore
+          }
+          setAudioSessionTypeSafe('auto');
+        })
+        .catch(() => {
+          bellUnlockInFlight = false;
+          if (ringAtStart !== activeRingToken || isBellCurrentlyRinging) {
+            return;
+          }
+          setAudioSessionTypeSafe('auto');
+        });
+    } else {
+      bellUnlockInFlight = false;
+      bellAudioUnlocked = true;
+      needsReprimeAfterBackground = false;
+      if (ringAtStart === activeRingToken && !isBellCurrentlyRinging) {
+        el.pause();
+        setAudioSessionTypeSafe('auto');
       }
     }
   } catch {
-    // Ignore restricted environment errors
+    bellUnlockInFlight = false;
   }
 }
 
@@ -346,98 +472,107 @@ export function installGlobalAudioUnlock() {
   if (globalUnlockInstalled || typeof window === 'undefined') return;
   globalUnlockInstalled = true;
 
-  const handleFirstGesture = () => {
+  const handleUserGesture = () => {
     unlockGymAudio();
-    if (
-      sharedAudioCtx &&
-      sharedAudioCtx.state === 'running' &&
-      bellAudioUnlocked
-    ) {
-      window.removeEventListener('pointerdown', handleFirstGesture, true);
-      window.removeEventListener('touchend', handleFirstGesture, true);
-      window.removeEventListener('keydown', handleFirstGesture, true);
-    }
   };
 
-  window.addEventListener('pointerdown', handleFirstGesture, true);
-  window.addEventListener('touchend', handleFirstGesture, true);
-  window.addEventListener('keydown', handleFirstGesture, true);
-
-  document.addEventListener('visibilitychange', () => {
-    if (
-      document.visibilityState === 'visible' &&
-      keepAliveNodes &&
-      sharedAudioCtx &&
-      (sharedAudioCtx.state === 'suspended' ||
-        sharedAudioCtx.state === 'interrupted')
-    ) {
-      sharedAudioCtx.resume().catch(() => {});
-    }
+  // Keep lightweight passive gesture listeners active so returning from background/Spotify
+  // automatically re-primes <audio> on the user's next tap if WebKit reclaimed the media pipeline
+  window.addEventListener('touchend', handleUserGesture, {
+    capture: true,
+    passive: true,
   });
+  window.addEventListener('click', handleUserGesture, {
+    capture: true,
+    passive: true,
+  });
+  window.addEventListener('keydown', handleUserGesture, {
+    capture: true,
+    passive: true,
+  });
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') {
+        needsReprimeAfterBackground = true;
+      } else if (document.visibilityState === 'visible') {
+        if (wakeLockDesired && !wakeLockSentinel) {
+          acquireWakeLockSafe();
+        }
+        if (bellAudioEl && bellAudioEl.error) {
+          bellAudioEl = null;
+          bellAudioUnlocked = false;
+        }
+      }
+    });
+  }
 }
 
 /**
- * Keeps the WebAudio graph alive at -100 dBFS (inaudible, 'ambient' mode so Spotify stays 100%)
- * ONLY while the between-set rest timer is actively counting down.
+ * Keeps the iPhone screen awake via Screen Wake Lock API while the between-set rest timer
+ * is actively counting down (replacing the counterproductive 1 Hz WebAudio oscillator).
  */
 export function setRestAudioKeepAlive(active) {
+  wakeLockDesired = Boolean(active);
+  if (!wakeLockDesired) {
+    releaseWakeLockSafe();
+    return;
+  }
+  acquireWakeLockSafe();
+}
+
+function triggerWebAudioBellFallback(token) {
   try {
-    if (!active) {
-      if (keepAliveNodes) {
+    const ctx = getOrCreateAudioContext();
+    if (!ctx) {
+      finishBellSession(token);
+      return;
+    }
+    if (uiCtxSuspendTimer) {
+      clearTimeout(uiCtxSuspendTimer);
+      uiCtxSuspendTimer = null;
+    }
+    setAudioSessionTypeSafe('playback');
+
+    const startBuffer = () => {
+      if (token !== activeRingToken) return;
+      const buffer = getBoxingBellAudioBuffer(ctx);
+      const source = ctx.createBufferSource();
+      const masterGain = ctx.createGain();
+      source.buffer = buffer;
+      masterGain.gain.setValueAtTime(1.0, ctx.currentTime);
+      source.connect(masterGain);
+      masterGain.connect(ctx.destination);
+      source.onended = () => {
+        finishBellSession(token);
         try {
-          keepAliveNodes.osc.stop();
-          keepAliveNodes.osc.disconnect();
-          keepAliveNodes.gain.disconnect();
+          if (ctx.state === 'running' && !isBellCurrentlyRinging) {
+            ctx.suspend().catch(() => {});
+          }
         } catch {
           // ignore
         }
-        keepAliveNodes = null;
-      }
-      return;
-    }
+      };
+      source.start(0);
+    };
 
-    const ctx = getOrCreateAudioContext();
-    if (!ctx) return;
-    if (ctx.state === 'suspended' || ctx.state === 'interrupted') {
-      ctx.resume().catch(() => {});
+    if (ctx.state === 'running') {
+      startBuffer();
+    } else {
+      ctx
+        .resume()
+        .then(startBuffer)
+        .catch(() => finishBellSession(token));
     }
-    if (keepAliveNodes) return;
-
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.value = 1; // Sub-audible 1 Hz
-    gain.gain.value = 0.00001; // -100 dBFS (prevents iOS graph sleep, completely silent)
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start();
-    keepAliveNodes = { osc, gain };
   } catch {
-    // ignore
+    finishBellSession(token);
   }
 }
 
-function playFallbackWavElement(onDone) {
-  const el = getOrCreateBellAudioElement();
-  if (!el) {
-    if (onDone) onDone();
-    return;
-  }
-  const wavUrl = getBoxingBellWavUrl();
-  if (el.src !== wavUrl) {
-    el.src = wavUrl;
-  }
-  el.muted = false;
-  el.currentTime = 0;
-  const p = el.play();
-  if (p && typeof p.then === 'function') {
-    p.catch(() => {});
-  }
-  if (onDone) {
-    setTimeout(onDone, Math.ceil(BELL_DURATION_SEC * 1000) + 100);
-  }
-}
-
+/**
+ * Rings the 3-strike boxing bell audibly EVEN WHEN iPHONE IS IN VIBRATE-ONLY / SILENT MODE.
+ * Uses 'playback' (AVAudioSessionCategoryPlayback) + persistent blessed HTMLAudioElement.
+ */
 export function playBoxingRingBell() {
   try {
     // Tactile 3-strike vibration on supported mobile browsers
@@ -449,79 +584,79 @@ export function playBoxingRingBell() {
       }
     }
 
-    const token = ++sessionResetToken;
-    // Switch iOS 16.4+/17+/18+ to 'transient' so the bell bypasses the physical Silent Switch
-    // AND gently ducks Spotify/Apple Music for 2.7s without pausing the user's music!
-    const hasAudioSession = setAudioSessionTypeSafe('transient');
-    const restoreAmbientSession = () => {
-      if (token === sessionResetToken && hasAudioSession) {
-        setAudioSessionTypeSafe('ambient');
+    const token = ++activeRingToken;
+    isBellCurrentlyRinging = true;
+    bellUnlockInFlight = false;
+
+    if (cleanupRingTimeoutId) {
+      clearTimeout(cleanupRingTimeoutId);
+      cleanupRingTimeoutId = null;
+    }
+
+    // Suspend any lingering UI WebAudio context so AVPlayer owns the audio route cleanly
+    if (sharedAudioCtx && sharedAudioCtx.state === 'running') {
+      try {
+        sharedAudioCtx.suspend().catch(() => {});
+      } catch {
+        // ignore
       }
-    };
+    }
 
-    const isLegacyIOS = isIOSDevice() && !hasAudioSession;
+    // CRITICAL FOR iOS VIBRATE-ONLY / SILENT SWITCH:
+    // 'playback' maps to AVAudioSessionCategoryPlayback (bypasses hardware Ring/Silent switch & Action Button)
+    setAudioSessionTypeSafe('playback');
 
-    // On very old iOS without navigator.audioSession, HTMLAudioElement bypasses the Silent Switch
-    if (isLegacyIOS && bellAudioUnlocked) {
-      playFallbackWavElement(restoreAmbientSession);
+    const el = ensureBellAudioElement();
+    if (!el) {
+      triggerWebAudioBellFallback(token);
       return;
     }
 
-    const ctx = getOrCreateAudioContext();
-    if (!ctx) {
-      playFallbackWavElement(restoreAmbientSession);
-      return;
-    }
+    el.muted = false;
+    el.volume = 1.0;
 
-    const triggerWebAudioBell = () => {
-      const buffer = getBoxingBellAudioBuffer(ctx);
-      const source = ctx.createBufferSource();
-      const masterGain = ctx.createGain();
-      source.buffer = buffer;
-      masterGain.gain.setValueAtTime(1.0, ctx.currentTime);
-      source.connect(masterGain);
-      masterGain.connect(ctx.destination);
-      source.onended = restoreAmbientSession;
-      source.start(0);
-    };
-
-    if (ctx.state === 'running') {
-      triggerWebAudioBell();
-      return;
-    }
-
-    // Attempt rapid resume (up to 140ms) before falling back exclusively to WAV <audio>
-    let settled = false;
-    const fallbackTimer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      if (ctx.state === 'running') {
-        triggerWebAudioBell();
+    try {
+      if (!el.paused) {
+        el.pause();
+      }
+      if (
+        el.readyState >= 1 &&
+        (!el.seekable ||
+          el.seekable.length === 0 ||
+          el.seekable.end(0) >= SILENT_LEAD_IN_SEC)
+      ) {
+        el.currentTime = SILENT_LEAD_IN_SEC;
       } else {
-        playFallbackWavElement(restoreAmbientSession);
+        el.currentTime = 0;
       }
-    }, 140);
+    } catch {
+      // If seek fails on cold buffer, plays seamlessly through the 250ms silent prefix
+    }
 
-    ctx
-      .resume()
-      .then(() => {
-        if (settled) return;
-        clearTimeout(fallbackTimer);
-        settled = true;
-        if (ctx.state === 'running') {
-          triggerWebAudioBell();
-        } else {
-          playFallbackWavElement(restoreAmbientSession);
-        }
-      })
-      .catch(() => {
-        if (settled) return;
-        clearTimeout(fallbackTimer);
-        settled = true;
-        playFallbackWavElement(restoreAmbientSession);
-      });
+    const safetyMs = Math.ceil(
+      (BELL_DURATION_SEC + SILENT_LEAD_IN_SEC + 0.45) * 1000
+    );
+    cleanupRingTimeoutId = setTimeout(() => {
+      finishBellSession(token);
+    }, safetyMs);
+
+    const playPromise = el.play();
+    if (playPromise && typeof playPromise.then === 'function') {
+      playPromise
+        .then(() => {
+          bellAudioUnlocked = true;
+          needsReprimeAfterBackground = false;
+        })
+        .catch(() => {
+          // Exclusive emergency fallback ONLY if HTMLAudioElement.play() rejected (zero double-play echo)
+          triggerWebAudioBellFallback(token);
+        });
+    } else {
+      bellAudioUnlocked = true;
+    }
   } catch {
-    // Ignore audio restriction errors
+    isBellCurrentlyRinging = false;
+    releasePlaybackSessionToAuto();
   }
 }
 
@@ -532,7 +667,11 @@ export function playGymSound(type = 'check') {
       return;
     }
 
-    setAudioSessionTypeSafe('ambient');
+    // Never let short UI bips downgrade an active boxing bell's 'playback' session
+    if (!isBellCurrentlyRinging) {
+      setAudioSessionTypeSafe('ambient');
+    }
+
     const ctx = getOrCreateAudioContext();
     if (!ctx) return;
     if (ctx.state === 'suspended' || ctx.state === 'interrupted') {
@@ -567,6 +706,24 @@ export function playGymSound(type = 'check') {
         osc.stop(now + idx * 0.08 + 0.26);
       });
     }
+
+    // Suspend UI AudioContext after short sound finishes so zero WebAudio streams stay open during rest
+    if (uiCtxSuspendTimer) {
+      clearTimeout(uiCtxSuspendTimer);
+    }
+    uiCtxSuspendTimer = setTimeout(() => {
+      uiCtxSuspendTimer = null;
+      if (!isBellCurrentlyRinging) {
+        setAudioSessionTypeSafe('auto');
+        if (sharedAudioCtx && sharedAudioCtx.state === 'running') {
+          try {
+            sharedAudioCtx.suspend().catch(() => {});
+          } catch {
+            // ignore
+          }
+        }
+      }
+    }, 650);
   } catch {
     // Ignore audio context autoplay errors
   }

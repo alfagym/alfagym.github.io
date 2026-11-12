@@ -38,7 +38,7 @@ import AccountModal from './components/AccountModal';
 import './App.css';
 
 /* global __BUILD_TIMESTAMP__ */
-const FALLBACK_TIMESTAMP = '7:57 PM - 11/11/2026';
+const FALLBACK_TIMESTAMP = '8:08 PM - 11/11/2026';
 const BUILD_TIMESTAMP =
   typeof __BUILD_TIMESTAMP__ !== 'undefined'
     ? __BUILD_TIMESTAMP__

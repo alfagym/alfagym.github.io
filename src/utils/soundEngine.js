@@ -1,34 +1,19 @@
-// Physical Modal Synthesis Boxing Ring Bell & Resilient iOS PWA Audio Engine
-// Zero external network assets required — works 100% offline & through iOS Vibrate-Only / Silent Mode
+// Authentic Stereo 2-Strike Gym Bell ("DING-DING!") & Resilient iOS PWA Audio Engine
+// Works 100% offline & through iPhone Vibrate-Only / Silent Mode without cutting Spotify on set checkmarks
 
-const SAMPLE_RATE = 44100;
-const SILENT_LEAD_IN_SEC = 0.25; // 250ms pure 0x0000 PCM16 silence for click-free muted=false iOS gesture blessing
-const BELL_DURATION_SEC = 2.65;
-const FUNDAMENTAL_HZ = 816; // Heavy cast-bronze boxing ring bell (~G#5)
+import {
+  BOXING_BELL_SAMPLE_RATE,
+  BOXING_BELL_LEAD_IN_SEC,
+  BOXING_BELL_DURATION_SEC,
+  BOXING_BELL_WAV_DATA_URI,
+} from '../data/boxingBellAsset';
 
-const STRIKE_TIMES_SEC = [0.0, 0.26, 0.52];
-const STRIKE_VELOCITIES = [0.92, 0.96, 1.0];
-
-// 11 inharmonic modal partials + close modal-splitting pairs for natural bronze shimmer
-const BOXING_BELL_MODES = [
-  { ratio: 0.5, amp: 0.28, decay: 2.05 }, // Hum tone (heavy bronze mass)
-  { ratio: 1.0, amp: 0.8, decay: 1.72 }, // Prime Fundamental A (816 Hz)
-  { ratio: 1.0048, amp: 0.52, decay: 1.58 }, // Prime Detune B (+3.9 Hz warble)
-  { ratio: 1.204, amp: 0.56, decay: 1.22 }, // Minor Tierce (signature bell interval)
-  { ratio: 1.518, amp: 0.4, decay: 0.9 }, // Inharmonic Quint
-  { ratio: 2.008, amp: 0.6, decay: 0.72 }, // Nominal Octave A
-  { ratio: 2.0155, amp: 0.35, decay: 0.62 }, // Nominal Detune B (+6.1 Hz shimmer)
-  { ratio: 2.574, amp: 0.35, decay: 0.44 }, // Superquint
-  { ratio: 3.09, amp: 0.27, decay: 0.28 }, // Brass edge bite
-  { ratio: 4.06, amp: 0.19, decay: 0.16 }, // High metallic clang
-  { ratio: 5.38, amp: 0.12, decay: 0.085 }, // Rim ping
-];
+const SILENT_LEAD_IN_SEC = BOXING_BELL_LEAD_IN_SEC;
+const BELL_DURATION_SEC = BOXING_BELL_DURATION_SEC;
 
 let sharedAudioCtx = null;
 let uiCtxSuspendTimer = null;
-let cachedBellSamples = null;
 let cachedBellAudioBuffer = null;
-let cachedBellWavDataUri = null;
 
 let bellAudioEl = null;
 let bellAudioUnlocked = false;
@@ -61,218 +46,10 @@ function setAudioSessionTypeSafe(type) {
 }
 
 function releasePlaybackSessionToAuto() {
-  // Explicitly step 'playback' -> 'ambient' -> 'auto' so WebKit GPUProcess drops
-  // AVAudioSessionCategoryPlayback immediately without leaving an 'ambient' override locked
+  // Step 'playback' -> 'ambient' -> 'auto' so WebKit GPUProcess releases
+  // AVAudioSessionCategoryPlayback immediately while leaving 'auto' clean in rest state
   setAudioSessionTypeSafe('ambient');
   setAudioSessionTypeSafe('auto');
-}
-
-function uint8ToBase64(bytes) {
-  const CHUNK_SIZE = 0x2000; // 8192-byte chunks avoid JS call-stack limits
-  const chunks = [];
-  for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
-    chunks.push(
-      String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK_SIZE))
-    );
-  }
-  return btoa(chunks.join(''));
-}
-
-function encodeBellWavWithLeadInDataUri(bellFloatSamples, sampleRate) {
-  const leadInSamples = Math.floor(sampleRate * SILENT_LEAD_IN_SEC);
-  const totalSamples = leadInSamples + bellFloatSamples.length;
-  const dataSize = totalSamples * 2;
-  const buffer = new ArrayBuffer(44 + dataSize);
-  const view = new DataView(buffer);
-
-  const writeStr = (offset, str) => {
-    for (let i = 0; i < str.length; i++) {
-      view.setUint8(offset + i, str.charCodeAt(i));
-    }
-  };
-
-  writeStr(0, 'RIFF');
-  view.setUint32(4, 36 + dataSize, true);
-  writeStr(8, 'WAVE');
-  writeStr(12, 'fmt ');
-  view.setUint32(16, 16, true); // PCM chunk size
-  view.setUint16(20, 1, true); // Linear PCM = 1
-  view.setUint16(22, 1, true); // Mono = 1 channel
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * 2, true); // Byte rate
-  view.setUint16(32, 2, true); // Block align
-  view.setUint16(34, 16, true); // 16 bits per sample
-  writeStr(36, 'data');
-  view.setUint32(40, dataSize, true);
-
-  // Samples [0 .. leadInSamples - 1] remain zero-initialized (0x0000 pure digital silence)
-  let offset = 44 + leadInSamples * 2;
-  for (let i = 0; i < bellFloatSamples.length; i++) {
-    // 1.5ms (66-sample) micro-ramp at strike boundary guarantees zero DC click when seeking to 0.25s
-    const ramp = i < 66 ? i / 66 : 1;
-    const clamped = Math.max(-1, Math.min(1, bellFloatSamples[i] * ramp));
-    const int16 = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
-    view.setInt16(offset, int16 | 0, true);
-    offset += 2;
-  }
-
-  return `data:audio/wav;base64,${uint8ToBase64(new Uint8Array(buffer))}`;
-}
-
-/**
- * Synthesizes a realistic 3-strike cast-bronze boxing ring bell ("DING-DING-DING!")
- * using coupled phasor resonators, steel clapper transient burst, 165 Hz high-pass,
- * and warm soft-clipping normalization.
- */
-export function getBoxingBellSamples() {
-  if (cachedBellSamples) return cachedBellSamples;
-
-  const totalSamples = Math.floor(SAMPLE_RATE * BELL_DURATION_SEC);
-  const out = new Float32Array(totalSamples);
-  const numModes = BOXING_BELL_MODES.length;
-
-  // Coupled phasor states: u = cos-component, v = sin-component (output)
-  const u = new Float64Array(numModes);
-  const v = new Float64Array(numModes);
-  const stepCos = new Float64Array(numModes);
-  const stepSin = new Float64Array(numModes);
-
-  for (let m = 0; m < numModes; m++) {
-    const mode = BOXING_BELL_MODES[m];
-    const freq = FUNDAMENTAL_HZ * mode.ratio;
-    const omega = (2 * Math.PI * freq) / SAMPLE_RATE;
-    const radius = Math.exp(-1 / (mode.decay * SAMPLE_RATE));
-    stepCos[m] = radius * Math.cos(omega);
-    stepSin[m] = radius * Math.sin(omega);
-  }
-
-  const strikeSampleIndices = STRIKE_TIMES_SEC.map((sec) =>
-    Math.floor(sec * SAMPLE_RATE)
-  );
-  let nextStrikePtr = 0;
-  let samplesSinceStrike = 999999;
-  let activeStrikeVel = 0;
-  let clapperPhase = 0;
-
-  // Resonant bandpass biquad state for steel striker transient (3250 Hz, Q = 5.5)
-  const bpW0 = (2 * Math.PI * 3250) / SAMPLE_RATE;
-  const bpAlpha = Math.sin(bpW0) / (2 * 5.5);
-  const bpB0 = bpAlpha / (1 + bpAlpha);
-  const bpB2 = -bpAlpha / (1 + bpAlpha);
-  const bpA1 = (-2 * Math.cos(bpW0)) / (1 + bpAlpha);
-  const bpA2 = (1 - bpAlpha) / (1 + bpAlpha);
-  let bpX1 = 0;
-  let bpX2 = 0;
-  let bpY1 = 0;
-  let bpY2 = 0;
-
-  // Deterministic PRNG for metallic hammer noise burst
-  let rngState = 0x13579bdf;
-
-  // 1st-order high-pass filter at 165 Hz to protect phone speaker headroom
-  const hpRC = 1 / (2 * Math.PI * 165);
-  const hpDt = 1 / SAMPLE_RATE;
-  const hpAlpha = hpRC / (hpRC + hpDt);
-  let hpPrevIn = 0;
-  let hpPrevOut = 0;
-
-  for (let n = 0; n < totalSamples; n++) {
-    if (
-      nextStrikePtr < strikeSampleIndices.length &&
-      n === strikeSampleIndices[nextStrikePtr]
-    ) {
-      const vel = STRIKE_VELOCITIES[nextStrikePtr];
-      // Physical contact of the steel hammer partially damps previous ring before re-exciting
-      if (nextStrikePtr > 0) {
-        for (let m = 0; m < numModes; m++) {
-          const damp = m < 5 ? 0.34 : 0.18;
-          u[m] *= damp;
-          v[m] *= damp;
-        }
-      }
-      for (let m = 0; m < numModes; m++) {
-        const amp = BOXING_BELL_MODES[m].amp * vel;
-        const initPhase = m * 0.37 + nextStrikePtr * 0.21;
-        u[m] += amp * Math.cos(initPhase);
-        v[m] += amp * Math.sin(initPhase);
-      }
-      samplesSinceStrike = 0;
-      activeStrikeVel = vel;
-      clapperPhase = 0;
-      nextStrikePtr++;
-    }
-
-    // Advance all 11 bronze resonators
-    let bellSum = 0;
-    for (let m = 0; m < numModes; m++) {
-      const nu = stepCos[m] * u[m] - stepSin[m] * v[m];
-      const nv = stepSin[m] * u[m] + stepCos[m] * v[m];
-      u[m] = nu;
-      v[m] = nv;
-      bellSum += nv;
-    }
-
-    // Add steel hammer strike transient during the first 18 ms of each hit
-    let transient = 0;
-    if (samplesSinceStrike < 800) {
-      const tStrike = samplesSinceStrike / SAMPLE_RATE;
-
-      // 1) Bandpass metallic clack burst (11 ms decay)
-      rngState = (rngState * 1664525 + 1013904223) >>> 0;
-      const white = (rngState / 2147483648 - 1) * Math.exp(-tStrike / 0.011);
-      const bpOut =
-        bpB0 * white + bpB2 * bpX2 - bpA1 * bpY1 - bpA2 * bpY2;
-      bpX2 = bpX1;
-      bpX1 = white;
-      bpY2 = bpY1;
-      bpY1 = bpOut;
-
-      // 2) Percussive steel pitch-drop knock (3100 Hz -> 480 Hz in 9 ms)
-      const sweepFreq = 480 + 2620 * Math.exp(-tStrike / 0.0032);
-      clapperPhase += (2 * Math.PI * sweepFreq) / SAMPLE_RATE;
-      const knock = Math.sin(clapperPhase) * Math.exp(-tStrike / 0.0065);
-
-      transient = (bpOut * 0.98 + knock * 0.5) * activeStrikeVel;
-      samplesSinceStrike++;
-    }
-
-    const rawMix = bellSum * 0.5 + transient;
-
-    // 165 Hz High-Pass Filter
-    const hpOut = hpAlpha * (hpPrevOut + rawMix - hpPrevIn);
-    hpPrevIn = rawMix;
-    hpPrevOut = hpOut;
-
-    // Warm analog-style soft saturation for loud phone speaker projection
-    out[n] = Math.tanh(hpOut * 1.75);
-  }
-
-  // Smooth 65 ms fade-out at the very end + peak normalization to 0.98 (-0.17 dBFS)
-  const fadeSamples = Math.floor(SAMPLE_RATE * 0.065);
-  let maxPeak = 0.001;
-  for (let n = 0; n < totalSamples; n++) {
-    if (n >= totalSamples - fadeSamples) {
-      const rem = (totalSamples - n) / fadeSamples;
-      out[n] *= rem * rem;
-    }
-    const abs = Math.abs(out[n]);
-    if (abs > maxPeak) maxPeak = abs;
-  }
-
-  const normGain = 0.98 / maxPeak;
-  for (let n = 0; n < totalSamples; n++) {
-    out[n] *= normGain;
-  }
-
-  cachedBellSamples = out;
-  return out;
-}
-
-function getBoxingBellWavDataUri() {
-  if (cachedBellWavDataUri) return cachedBellWavDataUri;
-  const samples = getBoxingBellSamples();
-  cachedBellWavDataUri = encodeBellWavWithLeadInDataUri(samples, SAMPLE_RATE);
-  return cachedBellWavDataUri;
 }
 
 function getOrCreateAudioContext() {
@@ -285,13 +62,43 @@ function getOrCreateAudioContext() {
   return sharedAudioCtx;
 }
 
+/**
+ * Lazily decodes the stereo 16-bit PCM frames directly from BOXING_BELL_WAV_DATA_URI
+ * (skipping the 250ms silent lead-in) for the emergency WebAudio fallback without duplicating bundle bytes.
+ */
 function getBoxingBellAudioBuffer(ctx) {
-  if (cachedBellAudioBuffer && cachedBellAudioBuffer.sampleRate === ctx.sampleRate) {
-    return cachedBellAudioBuffer;
+  if (cachedBellAudioBuffer) return cachedBellAudioBuffer;
+
+  const commaIdx = BOXING_BELL_WAV_DATA_URI.indexOf(',');
+  const b64 =
+    commaIdx >= 0
+      ? BOXING_BELL_WAV_DATA_URI.slice(commaIdx + 1)
+      : BOXING_BELL_WAV_DATA_URI;
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
   }
-  const samples = getBoxingBellSamples();
-  const buffer = ctx.createBuffer(1, samples.length, SAMPLE_RATE);
-  buffer.copyToChannel(samples, 0);
+
+  const view = new DataView(bytes.buffer);
+  const leadInFrames = Math.round(SILENT_LEAD_IN_SEC * BOXING_BELL_SAMPLE_RATE);
+  const pcmByteStart = 44 + leadInFrames * 4; // 44-byte RIFF header + stereo int16 lead-in
+  const totalBellFrames = Math.max(
+    1,
+    Math.floor((bytes.byteLength - pcmByteStart) / 4)
+  );
+
+  const buffer = ctx.createBuffer(2, totalBellFrames, BOXING_BELL_SAMPLE_RATE);
+  const left = buffer.getChannelData(0);
+  const right = buffer.getChannelData(1);
+
+  let ptr = pcmByteStart;
+  for (let i = 0; i < totalBellFrames; i++) {
+    left[i] = view.getInt16(ptr, true) / 32768;
+    right[i] = view.getInt16(ptr + 2, true) / 32768;
+    ptr += 4;
+  }
+
   cachedBellAudioBuffer = buffer;
   return buffer;
 }
@@ -322,8 +129,8 @@ function ensureBellAudioElement() {
   if (typeof window === 'undefined' || typeof Audio === 'undefined') return null;
   if (bellAudioEl && !bellAudioEl.error) return bellAudioEl;
 
-  // Immutable Base64 WAV Data URI: immune to iOS Home Screen PWA BlobRegistry eviction
-  const el = new Audio(getBoxingBellWavDataUri());
+  // Immutable Base64 stereo WAV Data URI: immune to iOS Home Screen PWA BlobRegistry eviction
+  const el = new Audio(BOXING_BELL_WAV_DATA_URI);
   el.preload = 'auto';
   el.playsInline = true;
   el.volume = 1.0;
@@ -476,8 +283,6 @@ export function installGlobalAudioUnlock() {
     unlockGymAudio();
   };
 
-  // Keep lightweight passive gesture listeners active so returning from background/Spotify
-  // automatically re-primes <audio> on the user's next tap if WebKit reclaimed the media pipeline
   window.addEventListener('touchend', handleUserGesture, {
     capture: true,
     passive: true,
@@ -510,7 +315,7 @@ export function installGlobalAudioUnlock() {
 
 /**
  * Keeps the iPhone screen awake via Screen Wake Lock API while the between-set rest timer
- * is actively counting down (replacing the counterproductive 1 Hz WebAudio oscillator).
+ * is actively counting down.
  */
 export function setRestAudioKeepAlive(active) {
   wakeLockDesired = Boolean(active);
@@ -570,15 +375,15 @@ function triggerWebAudioBellFallback(token) {
 }
 
 /**
- * Rings the 3-strike boxing bell audibly EVEN WHEN iPHONE IS IN VIBRATE-ONLY / SILENT MODE.
- * Uses 'playback' (AVAudioSessionCategoryPlayback) + persistent blessed HTMLAudioElement.
+ * Rings the authentic 2-strike stereo gym bell ("DING-DING!") audibly
+ * EVEN WHEN iPHONE IS IN VIBRATE-ONLY / SILENT MODE.
  */
 export function playBoxingRingBell() {
   try {
-    // Tactile 3-strike vibration on supported mobile browsers
+    // Tactile 2-strike vibration calibrated to exact strike 1 (0ms) and strike 2 (255ms)
     if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
       try {
-        navigator.vibrate([100, 155, 100, 155, 280]);
+        navigator.vibrate([100, 155, 220]);
       } catch {
         // ignore
       }
@@ -602,7 +407,6 @@ export function playBoxingRingBell() {
       }
     }
 
-    // CRITICAL FOR iOS VIBRATE-ONLY / SILENT SWITCH:
     // 'playback' maps to AVAudioSessionCategoryPlayback (bypasses hardware Ring/Silent switch & Action Button)
     setAudioSessionTypeSafe('playback');
 
@@ -630,11 +434,11 @@ export function playBoxingRingBell() {
         el.currentTime = 0;
       }
     } catch {
-      // If seek fails on cold buffer, plays seamlessly through the 250ms silent prefix
+      // Plays seamlessly through the 250ms silent prefix if seek is not ready yet
     }
 
     const safetyMs = Math.ceil(
-      (BELL_DURATION_SEC + SILENT_LEAD_IN_SEC + 0.45) * 1000
+      (BELL_DURATION_SEC + SILENT_LEAD_IN_SEC + 0.35) * 1000
     );
     cleanupRingTimeoutId = setTimeout(() => {
       finishBellSession(token);
@@ -648,7 +452,6 @@ export function playBoxingRingBell() {
           needsReprimeAfterBackground = false;
         })
         .catch(() => {
-          // Exclusive emergency fallback ONLY if HTMLAudioElement.play() rejected (zero double-play echo)
           triggerWebAudioBellFallback(token);
         });
     } else {
@@ -667,7 +470,6 @@ export function playGymSound(type = 'check') {
       return;
     }
 
-    // Never let short UI bips downgrade an active boxing bell's 'playback' session
     if (!isBellCurrentlyRinging) {
       setAudioSessionTypeSafe('ambient');
     }
@@ -707,7 +509,6 @@ export function playGymSound(type = 'check') {
       });
     }
 
-    // Suspend UI AudioContext after short sound finishes so zero WebAudio streams stay open during rest
     if (uiCtxSuspendTimer) {
       clearTimeout(uiCtxSuspendTimer);
     }

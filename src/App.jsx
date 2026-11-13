@@ -27,6 +27,7 @@ import {
   computeWorkoutElapsedSeconds,
 } from './utils/workoutMath';
 import { pushToGitHubGist } from './utils/githubSync';
+import { ensureExercisesUids } from './hooks/useLongPressReorder';
 import AuthScreen from './components/AuthScreen';
 import LiveWorkoutLogger from './components/LiveWorkoutLogger';
 import RoutinesView from './components/RoutinesView';
@@ -38,7 +39,7 @@ import AccountModal from './components/AccountModal';
 import './App.css';
 
 /* global __BUILD_TIMESTAMP__ */
-const FALLBACK_TIMESTAMP = '8:08 PM - 11/11/2026';
+const FALLBACK_TIMESTAMP = '9:26 PM - 11/12/2026';
 const BUILD_TIMESTAMP =
   typeof __BUILD_TIMESTAMP__ !== 'undefined'
     ? __BUILD_TIMESTAMP__
@@ -124,7 +125,10 @@ function loadUserRoutines(userKey) {
     const others = cleanedList.filter(
       (r) => !r.id.startsWith('routine-hevy-')
     );
-    return [...topHevy, ...others];
+    return [...topHevy, ...others].map((rt) => ({
+      ...rt,
+      exercises: ensureExercisesUids(rt.exercises),
+    }));
   };
 
   try {
@@ -158,7 +162,10 @@ function loadUserRoutines(userKey) {
   } catch {
     // ignore
   }
-  const freshCopy = JSON.parse(JSON.stringify(DEFAULT_ROUTINES));
+  const freshCopy = JSON.parse(JSON.stringify(DEFAULT_ROUTINES)).map((rt) => ({
+    ...rt,
+    exercises: ensureExercisesUids(rt.exercises),
+  }));
   try {
     localStorage.setItem(
       `alfa_gym_routines_${userKey}`,
@@ -244,10 +251,23 @@ function loadUserActiveWorkout(userKey) {
     const userSaved = localStorage.getItem(
       `alfa_gym_active_workout_${userKey}`
     );
-    if (userSaved) return JSON.parse(userSaved);
+    if (userSaved) {
+      const parsed = JSON.parse(userSaved);
+      return parsed
+        ? { ...parsed, exercises: ensureExercisesUids(parsed.exercises) }
+        : null;
+    }
     if (userKey === 'raydel') {
       const legacy = localStorage.getItem('alfa_gym_active_workout');
-      if (legacy) return JSON.parse(legacy);
+      if (legacy) {
+        const parsedLegacy = JSON.parse(legacy);
+        return parsedLegacy
+          ? {
+              ...parsedLegacy,
+              exercises: ensureExercisesUids(parsedLegacy.exercises),
+            }
+          : null;
+      }
     }
   } catch {
     // ignore
@@ -820,21 +840,23 @@ export default function App() {
       pausedAt: null,
       totalPausedMs: 0,
       notes: routine.notes || '',
-      exercises: (routine.exercises || []).map((ex) => ({
-        exerciseId: ex.exerciseId,
-        restSeconds: ex.restSeconds || 45,
-        supersetGroup: null,
-        note: ex.note || '',
-        sets: (ex.sets || []).map((s, idx) => ({
-          id: `s-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 5)}`,
-          type: s.type || 'normal',
-          weight: s.weight,
-          reps: s.reps,
-          rpe: s.rpe || 8,
-          completed: false,
-          isPR: false,
-        })),
-      })),
+      exercises: ensureExercisesUids(
+        (routine.exercises || []).map((ex) => ({
+          exerciseId: ex.exerciseId,
+          restSeconds: ex.restSeconds || 45,
+          supersetGroup: null,
+          note: ex.note || '',
+          sets: (ex.sets || []).map((s, idx) => ({
+            id: `s-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 5)}`,
+            type: s.type || 'normal',
+            weight: s.weight,
+            reps: s.reps,
+            rpe: s.rpe || 8,
+            completed: false,
+            isPR: false,
+          })),
+        }))
+      ),
     });
     setActiveTab('workout');
   };

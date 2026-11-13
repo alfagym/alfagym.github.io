@@ -16,8 +16,18 @@ import {
   FileText,
   RotateCcw,
   Sparkles,
+  GripVertical,
+  ChevronDown,
 } from 'lucide-react';
 import { formatWeightValue, toLbs } from '../utils/workoutMath';
+import {
+  useLongPressReorder,
+  DragFollowerPortal,
+  createExerciseUid,
+  ensureExercisesUids,
+  stripExerciseUid,
+  getExerciseItemKey,
+} from '../hooks/useLongPressReorder';
 import ExerciseMediaModal from './ExerciseMediaModal';
 
 const SET_TYPE_ORDER = ['normal', 'warmup', 'dropset', 'failure'];
@@ -86,12 +96,68 @@ export default function RoutinesView({
     return lang === 'es' ? ex.nameEs || ex.nameEn : ex.nameEn || ex.nameEs;
   };
 
+  const cloneRoutineForEdit = (rt) => {
+    const cloned = JSON.parse(JSON.stringify(rt));
+    return {
+      ...cloned,
+      exercises: ensureExercisesUids(cloned.exercises),
+    };
+  };
+
+  const handleReorderDraftExercises = (fromIdx, toIdx) => {
+    setEditingRoutine((prev) => {
+      if (!prev || !Array.isArray(prev.exercises)) return prev;
+      if (
+        fromIdx < 0 ||
+        toIdx < 0 ||
+        fromIdx >= prev.exercises.length ||
+        toIdx >= prev.exercises.length ||
+        fromIdx === toIdx
+      ) {
+        return prev;
+      }
+      const list = ensureExercisesUids(prev.exercises);
+      const [moved] = list.splice(fromIdx, 1);
+      list.splice(toIdx, 0, moved);
+      return { ...prev, exercises: list };
+    });
+  };
+
+  const draftReorder = useLongPressReorder({
+    items: editingRoutine?.exercises || [],
+    onReorder: handleReorderDraftExercises,
+    getItemLabel: (exItem) => getExName(exerciseMap[exItem?.exerciseId]),
+    getItemThumb: (exItem) =>
+      exerciseMap[exItem?.exerciseId]?.thumbnailUrl || null,
+  });
+
+  const handleReorderCardExercises = (routineId, fromIdx, toIdx) => {
+    setRoutines((prev) =>
+      prev.map((rt) => {
+        if (rt.id !== routineId) return rt;
+        const list = ensureExercisesUids(rt.exercises);
+        if (
+          fromIdx < 0 ||
+          toIdx < 0 ||
+          fromIdx >= list.length ||
+          toIdx >= list.length ||
+          fromIdx === toIdx
+        ) {
+          return rt;
+        }
+        const [moved] = list.splice(fromIdx, 1);
+        list.splice(toIdx, 0, moved);
+        return { ...rt, exercises: list };
+      })
+    );
+  };
+
   // Open routine editor automatically if triggered from Home Hub
   useEffect(() => {
     if (initialEditingRoutineId) {
       const target = routines.find((r) => r.id === initialEditingRoutineId);
       if (target) {
-        setEditingRoutine(JSON.parse(JSON.stringify(target)));
+        setEditingRoutine(cloneRoutineForEdit(target));
       }
       if (onClearInitialEditingRoutine) {
         onClearInitialEditingRoutine();
@@ -121,6 +187,7 @@ export default function RoutinesView({
       notes: '',
       exercises: [
         {
+          _uid: createExerciseUid(),
           exerciseId: firstExId,
           restSeconds: 60,
           note: '',
@@ -175,7 +242,7 @@ export default function RoutinesView({
       (lang === 'es' ? 'Mi Rutina Personalizada' : 'My Custom Routine');
 
     const normalizedExercises = (editingRoutine.exercises || []).map((ex) => ({
-      ...ex,
+      ...stripExerciseUid(ex),
       restSeconds: Math.max(0, Number(ex.restSeconds) || 45),
       note: ex.note || '',
       sets: (ex.sets || []).map((s) => ({
@@ -214,6 +281,7 @@ export default function RoutinesView({
       exercises: [
         ...(prev.exercises || []),
         {
+          _uid: createExerciseUid(),
           exerciseId: exId,
           restSeconds: exObj?.defaultRestSeconds || 45,
           note: '',
@@ -440,9 +508,7 @@ export default function RoutinesView({
                   <button
                     type="button"
                     className="icon-btn-subtle"
-                    onClick={() =>
-                      setEditingRoutine(JSON.parse(JSON.stringify(rt)))
-                    }
+                    onClick={() => setEditingRoutine(cloneRoutineForEdit(rt))}
                     title={t.routines.editBtn}
                   >
                     <Edit3 size={15} />
@@ -468,53 +534,17 @@ export default function RoutinesView({
 
               {rt.notes && <p className="routine-card-notes">{rt.notes}</p>}
 
-              <div className="routine-ex-breakdown">
-                {(rt.exercises || []).map((exItem, idx) => {
-                  const exObj = exerciseMap[exItem.exerciseId];
-                  const topSet = exItem.sets?.[exItem.sets.length - 1];
-                  return (
-                    <div key={idx} className="routine-ex-line">
-                      <div className="routine-ex-line-left">
-                        <span className="routine-ex-name">
-                          {exObj?.thumbnailUrl && (
-                            <button
-                              type="button"
-                              className="thumb-zoom-btn"
-                              onClick={() => setPreviewExercise(exObj)}
-                              title={
-                                lang === 'es'
-                                  ? 'Toca para ver la imagen/video en grande'
-                                  : 'Tap to enlarge exercise image/video'
-                              }
-                            >
-                              <img
-                                src={exObj.thumbnailUrl}
-                                alt={getExName(exObj)}
-                                className="routine-line-thumb"
-                              />
-                            </button>
-                          )}
-                          <span>
-                            <strong>{exItem.sets?.length || 3}×</strong>{' '}
-                            {getExName(exObj)}
-                          </span>
-                        </span>
-                        {exItem.note && (
-                          <span className="routine-ex-inline-note">
-                            📌 {exItem.note}
-                          </span>
-                        )}
-                      </div>
-                      {topSet && (
-                        <span className="routine-ex-target">
-                          {formatWeightValue(topSet.weight, unit)} {unit} ×{' '}
-                          {topSet.reps}
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+              <RoutineCardBreakdown
+                routine={rt}
+                exerciseMap={exerciseMap}
+                getExName={getExName}
+                lang={lang}
+                unit={unit}
+                onPreviewExercise={setPreviewExercise}
+                onReorder={(fromIdx, toIdx) =>
+                  handleReorderCardExercises(rt.id, fromIdx, toIdx)
+                }
+              />
 
               <div className="routine-card-footer">
                 <span className="routine-stats-text">
@@ -527,9 +557,7 @@ export default function RoutinesView({
                   <button
                     type="button"
                     className="routine-edit-pill-btn"
-                    onClick={() =>
-                      setEditingRoutine(JSON.parse(JSON.stringify(rt)))
-                    }
+                    onClick={() => setEditingRoutine(cloneRoutineForEdit(rt))}
                   >
                     <Edit3 size={14} />
                     <span>{t.routines.editBtn}</span>
@@ -642,17 +670,25 @@ export default function RoutinesView({
               </div>
 
               {/* Exercises inside Routine */}
-              <div className="routine-editor-ex-list">
+              <div
+                ref={draftReorder.containerRef}
+                className="routine-editor-ex-list"
+              >
                 {(editingRoutine.exercises || []).map((exItem, exIdx) => {
                   const exObj = exerciseMap[exItem.exerciseId];
                   return (
-                    <div key={exIdx} className="routine-draft-ex-box">
-                      {/* Exercise Top Row: Thumbnail, Exercise Selector, Order Up/Down, Delete */}
+                    <div
+                      key={getExerciseItemKey(exItem, exIdx)}
+                      data-reorder-item="true"
+                      className={`routine-draft-ex-box ${
+                        draftReorder.dragState?.activeIdx === exIdx
+                          ? 'is-dragging-card'
+                          : ''
+                      }`}
+                    >
+                      {/* Exercise Top Row: Thumbnail, Draggable Exercise Name, Swap Selector, Order Up/Down, Delete */}
                       <div className="draft-ex-header">
                         <div className="draft-ex-title-wrap">
-                          <span className="draft-ex-index-badge">
-                            #{exIdx + 1}
-                          </span>
                           {exObj?.thumbnailUrl && (
                             <button
                               type="button"
@@ -671,19 +707,61 @@ export default function RoutinesView({
                               />
                             </button>
                           )}
-                          <select
-                            className="draft-ex-select"
-                            value={exItem.exerciseId}
-                            onChange={(e) =>
-                              handleChangeDraftExerciseId(exIdx, e.target.value)
+                          <div
+                            className="draft-ex-name-handle ex-drag-handle"
+                            title={
+                              lang === 'es'
+                                ? 'Mantén presionado el nombre y arrastra para cambiar el orden'
+                                : 'Hold exercise name and drag to reorder'
+                            }
+                            {...draftReorder.getHandleProps(exIdx)}
+                          >
+                            <span
+                              className="ex-grip-cue"
+                              data-instant-grip="true"
+                            >
+                              <GripVertical size={15} />
+                            </span>
+                            <span className="draft-ex-index-badge">
+                              #{exIdx + 1}
+                            </span>
+                            <strong className="draft-ex-name-label">
+                              {getExName(exObj)}
+                            </strong>
+                          </div>
+
+                          <div
+                            className="draft-ex-swap-pill"
+                            title={
+                              lang === 'es'
+                                ? 'Cambiar ejercicio'
+                                : 'Change exercise'
                             }
                           >
-                            {exercisesLibrary.map((libEx) => (
-                              <option key={libEx.id} value={libEx.id}>
-                                {getExName(libEx)}
-                              </option>
-                            ))}
-                          </select>
+                            <span>{lang === 'es' ? 'Cambiar' : 'Swap'}</span>
+                            <ChevronDown size={13} />
+                            <select
+                              className="draft-ex-select-native"
+                              value={exItem.exerciseId}
+                              aria-label={
+                                lang === 'es'
+                                  ? 'Cambiar ejercicio'
+                                  : 'Change exercise'
+                              }
+                              onChange={(e) =>
+                                handleChangeDraftExerciseId(
+                                  exIdx,
+                                  e.target.value
+                                )
+                              }
+                            >
+                              {exercisesLibrary.map((libEx) => (
+                                <option key={libEx.id} value={libEx.id}>
+                                  {getExName(libEx)}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
                         </div>
 
                         <div className="draft-ex-Order-actions">
@@ -1104,6 +1182,108 @@ export default function RoutinesView({
         t={t}
         onClose={() => setPreviewExercise(null)}
       />
+
+      <DragFollowerPortal
+        dragState={draftReorder.dragState}
+        followerRef={draftReorder.followerRef}
+        lang={lang}
+      />
     </div>
+  );
+}
+
+function RoutineCardBreakdown({
+  routine,
+  exerciseMap,
+  getExName,
+  lang,
+  unit,
+  onPreviewExercise,
+  onReorder,
+}) {
+  const cardReorder = useLongPressReorder({
+    items: routine.exercises || [],
+    onReorder,
+    getItemLabel: (exItem) => getExName(exerciseMap[exItem?.exerciseId]),
+    getItemThumb: (exItem) =>
+      exerciseMap[exItem?.exerciseId]?.thumbnailUrl || null,
+  });
+
+  return (
+    <>
+      <div ref={cardReorder.containerRef} className="routine-ex-breakdown">
+        {(routine.exercises || []).map((exItem, idx) => {
+          const exObj = exerciseMap[exItem.exerciseId];
+          const topSet = exItem.sets?.[exItem.sets.length - 1];
+          return (
+            <div
+              key={getExerciseItemKey(exItem, idx)}
+              data-reorder-item="true"
+              className={`routine-ex-line ${
+                cardReorder.dragState?.activeIdx === idx ? 'is-dragging-line' : ''
+              }`}
+            >
+              <div className="routine-ex-line-left">
+                <span className="routine-ex-name">
+                  {exObj?.thumbnailUrl && (
+                    <button
+                      type="button"
+                      className="thumb-zoom-btn"
+                      onClick={() => onPreviewExercise(exObj)}
+                      title={
+                        lang === 'es'
+                          ? 'Toca para ver la imagen/video en grande'
+                          : 'Tap to enlarge exercise image/video'
+                      }
+                    >
+                      <img
+                        src={exObj.thumbnailUrl}
+                        alt={getExName(exObj)}
+                        className="routine-line-thumb"
+                      />
+                    </button>
+                  )}
+                  <span
+                    className="routine-ex-drag-label ex-drag-handle"
+                    title={
+                      lang === 'es'
+                        ? 'Mantén presionado el nombre y arrastra para cambiar el orden'
+                        : 'Hold exercise name and drag to reorder'
+                    }
+                    {...cardReorder.getHandleProps(idx)}
+                  >
+                    <GripVertical
+                      size={13}
+                      className="ex-grip-cue-sm"
+                      data-instant-grip="true"
+                    />
+                    <span>
+                      <strong>{exItem.sets?.length || 3}×</strong>{' '}
+                      {getExName(exObj)}
+                    </span>
+                  </span>
+                </span>
+                {exItem.note && (
+                  <span className="routine-ex-inline-note">
+                    📌 {exItem.note}
+                  </span>
+                )}
+              </div>
+              {topSet && (
+                <span className="routine-ex-target">
+                  {formatWeightValue(topSet.weight, unit)} {unit} × {topSet.reps}
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <DragFollowerPortal
+        dragState={cardReorder.dragState}
+        followerRef={cardReorder.followerRef}
+        lang={lang}
+      />
+    </>
   );
 }

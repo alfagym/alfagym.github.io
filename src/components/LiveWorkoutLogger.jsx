@@ -23,6 +23,7 @@ import {
   Save,
   Bell,
   BellOff,
+  GripVertical,
 } from 'lucide-react';
 import {
   calculate1RM,
@@ -37,6 +38,13 @@ import {
   unlockGymAudio,
   computeWorkoutElapsedSeconds,
 } from '../utils/workoutMath';
+import {
+  useLongPressReorder,
+  DragFollowerPortal,
+  createExerciseUid,
+  ensureExercisesUids,
+  getExerciseItemKey,
+} from '../hooks/useLongPressReorder';
 import ExerciseMediaModal from './ExerciseMediaModal';
 
 const SET_TYPE_ORDER = ['normal', 'warmup', 'dropset', 'failure'];
@@ -95,6 +103,34 @@ export default function LiveWorkoutLogger({
     }
     return map;
   }, [exercisesLibrary]);
+
+  const handleReorderActiveExercises = (fromIdx, toIdx) => {
+    setActiveWorkout((prev) => {
+      if (!prev || !Array.isArray(prev.exercises)) return prev;
+      if (
+        fromIdx < 0 ||
+        toIdx < 0 ||
+        fromIdx >= prev.exercises.length ||
+        toIdx >= prev.exercises.length ||
+        fromIdx === toIdx
+      ) {
+        return prev;
+      }
+      const nextExs = ensureExercisesUids(prev.exercises);
+      const [moved] = nextExs.splice(fromIdx, 1);
+      nextExs.splice(toIdx, 0, moved);
+      return { ...prev, exercises: nextExs };
+    });
+  };
+
+  const liveReorder = useLongPressReorder({
+    items: activeWorkout?.exercises || [],
+    onReorder: handleReorderActiveExercises,
+    onDragStart: () => setPlatePopover(null),
+    getItemLabel: (exItem) => getExName(exerciseMap[exItem?.exerciseId]),
+    getItemThumb: (exItem) =>
+      exerciseMap[exItem?.exerciseId]?.thumbnailUrl || null,
+  });
 
   // Compute live workout stats
   const liveStats = useMemo(() => {
@@ -306,6 +342,7 @@ export default function LiveWorkoutLogger({
         exercises: [
           ...(prev.exercises || []),
           {
+            _uid: createExerciseUid(),
             exerciseId: exerciseObj.id,
             restSeconds: exerciseObj.defaultRestSeconds || 90,
             supersetGroup: null,
@@ -877,7 +914,7 @@ export default function LiveWorkoutLogger({
 
       {/* Dedicated Scroll Container ONLY for Exercise Cards */}
       <div className="live-exercises-scroll-area">
-        <div className="live-exercises-stack">
+        <div ref={liveReorder.containerRef} className="live-exercises-stack">
         {(activeWorkout.exercises || []).length === 0 ? (
           <div className="empty-workout-placeholder">
             <Dumbbell size={40} className="text-muted" />
@@ -905,10 +942,11 @@ export default function LiveWorkoutLogger({
 
             return (
               <div
-                key={`${exItem.exerciseId}-${exIdx}`}
+                key={getExerciseItemKey(exItem, exIdx)}
+                data-reorder-item="true"
                 className={`live-exercise-card ${
                   exItem.supersetGroup ? `superset-${exItem.supersetGroup}` : ''
-                }`}
+                } ${liveReorder.dragState?.activeIdx === exIdx ? 'is-dragging-card' : ''}`}
               >
                 {/* Exercise Card Header */}
                 <div className="live-ex-card-header">
@@ -931,7 +969,15 @@ export default function LiveWorkoutLogger({
                         />
                       </button>
                     )}
-                    <div className="live-ex-title-group">
+                    <div
+                      className="live-ex-title-group ex-drag-handle"
+                      title={
+                        lang === 'es'
+                          ? 'Mantén presionado el nombre y arrastra para cambiar el orden'
+                          : 'Hold exercise name and drag to reorder'
+                      }
+                      {...liveReorder.getHandleProps(exIdx)}
+                    >
                       {exItem.supersetGroup && (
                         <span
                           className={`superset-badge group-${exItem.supersetGroup}`}
@@ -939,7 +985,12 @@ export default function LiveWorkoutLogger({
                           {t.workout.supersetToggle} {exItem.supersetGroup}
                         </span>
                       )}
-                      <h3>{getExName(exObj)}</h3>
+                      <div className="live-ex-heading-row">
+                        <span className="ex-grip-cue" data-instant-grip="true">
+                          <GripVertical size={16} />
+                        </span>
+                        <h3>{getExName(exObj)}</h3>
+                      </div>
                       <div className="live-ex-tags">
                         <span className="muscle-tag">
                           {t.muscles[exObj.primaryMuscle] || exObj.primaryMuscle}
@@ -1535,6 +1586,12 @@ export default function LiveWorkoutLogger({
         lang={lang}
         t={t}
         onClose={() => setPreviewExercise(null)}
+      />
+
+      <DragFollowerPortal
+        dragState={liveReorder.dragState}
+        followerRef={liveReorder.followerRef}
+        lang={lang}
       />
     </div>
   );

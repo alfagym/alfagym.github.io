@@ -3592,3 +3592,197 @@
     padding-bottom: 6px;
   }
 }
+
+/* ==========================================================================
+   LONG-PRESS EXERCISE DRAG & REORDER (iOS PWA + DESKTOP)
+   ========================================================================== */
+.ex-drag-handle {
+  cursor: grab;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: pan-y;
+}
+
+body.alfa-dragging-active,
+body.alfa-dragging-active * {
+  -webkit-user-select: none !important;
+  user-select: none !important;
+  -webkit-touch-callout: none !important;
+  cursor: grabbing !important;
+}
+
+.live-ex-heading-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 5px;
+}
+
+.live-ex-heading-row h3 {
+  margin-bottom: 0;
+}
+
+.ex-grip-cue,
+.ex-grip-cue-sm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  flex-shrink: 0;
+  transition: color 0.15s ease;
+}
+
+.ex-drag-handle:hover .ex-grip-cue,
+.ex-drag-handle:active .ex-grip-cue,
+.ex-drag-handle:hover .ex-grip-cue-sm,
+.ex-drag-handle:active .ex-grip-cue-sm {
+  color: #38bdf8;
+}
+
+.draft-ex-name-handle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 9px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(56, 189, 248, 0.18);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.draft-ex-name-handle:hover,
+.draft-ex-name-handle:active {
+  border-color: rgba(56, 189, 248, 0.5);
+  background: rgba(29, 140, 248, 0.12);
+}
+
+.draft-ex-name-label {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #f8fafc;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.draft-ex-swap-pill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(29, 140, 248, 0.14);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: #38bdf8;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.draft-ex-select-native {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.routine-ex-drag-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 4px;
+  border-radius: 6px;
+}
+
+.live-exercise-card.is-dragging-card,
+.routine-draft-ex-box.is-dragging-card {
+  border-color: #38bdf8 !important;
+  background: rgba(29, 140, 248, 0.11) !important;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.35),
+    0 12px 28px rgba(2, 8, 23, 0.55);
+}
+
+.routine-ex-line.is-dragging-line {
+  background: rgba(29, 140, 248, 0.16);
+  border-radius: 8px;
+  outline: 1px dashed #38bdf8;
+}
+
+.alfa-drag-follower-portal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 10000;
+  pointer-events: none;
+  will-change: transform;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(340px, calc(100vw - 24px));
+  padding: 9px 13px;
+  border-radius: 12px;
+  background: rgba(10, 16, 29, 0.96);
+  border: 1.5px solid #38bdf8;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.65),
+    0 0 0 1px rgba(56, 189, 248, 0.25);
+  color: #f8fafc;
+  backdrop-filter: blur(10px);
+}
+
+.drag-follower-idx {
+  background: rgba(29, 140, 248, 0.22);
+  color: #38bdf8;
+  font-size: 11.5px;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.drag-follower-thumb {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #ffffff;
+  flex-shrink: 0;
+}
+
+.drag-follower-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+  font-weight: 800;
+}
+
+.drag-follower-hint {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #38bdf8;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  flex-shrink: 0;
+}
+
+@media (max-width: 640px) {
+  .draft-ex-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .draft-ex-title-wrap {
+    flex-basis: 100%;
+    flex-wrap: nowrap;
+  }
+
+  .draft-ex-Order-actions {
+    margin-left: auto;
+  }
+}

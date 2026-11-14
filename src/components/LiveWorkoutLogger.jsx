@@ -1586,7 +1586,10 @@ export default function LiveWorkoutLogger({
           <div className="rest-timer-content">
             <div
               className="rest-timer-info"
-              onClick={() => onPreviewBellSound && onPreviewBellSound()}
+              onClick={() => {
+                unlockGymAudio();
+                onPreviewBellSound?.();
+              }}
               style={{ cursor: 'pointer' }}
               title={
                 lang === 'es'

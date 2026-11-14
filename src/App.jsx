@@ -18,6 +18,7 @@ import {
   Flame,
   Timer,
   UserCog,
+  Bell,
 } from 'lucide-react';
 import { translations } from './data/translations';
 import {
@@ -61,7 +62,7 @@ import AccountModal from './components/AccountModal';
 import './App.css';
 
 /* global __BUILD_TIMESTAMP__ */
-const FALLBACK_TIMESTAMP = '11:07 AM - 11/14/2026';
+const FALLBACK_TIMESTAMP = '11:45 AM - 11/14/2026';
 const BUILD_TIMESTAMP =
   typeof __BUILD_TIMESTAMP__ !== 'undefined'
     ? __BUILD_TIMESTAMP__
@@ -151,11 +152,11 @@ function loadUserRestTimer(userKey) {
 
     if (!saved.endTime) return { ...EMPTY_REST_TIMER };
     const msLeft = Number(saved.endTime) - Date.now();
-    if (msLeft <= -4000) {
+    if (msLeft <= -15 * 60 * 1000) {
       localStorage.removeItem(`alfa_gym_rest_timer_${userKey}`);
       return { ...EMPTY_REST_TIMER };
     }
-    const remSec = msLeft <= 0 ? 1 : Math.max(1, Math.ceil(msLeft / 1000));
+    const remSec = msLeft <= 0 ? 0 : Math.max(1, Math.ceil(msLeft / 1000));
     return {
       ...EMPTY_REST_TIMER,
       ...saved,
@@ -163,7 +164,7 @@ function loadUserRestTimer(userKey) {
       isPaused: false,
       pausedRemainingMs: null,
       remaining: remSec,
-      total: Math.max(remSec, Number(saved.total) || 90),
+      total: Math.max(1, remSec, Number(saved.total) || 90),
     };
   } catch {
     return { ...EMPTY_REST_TIMER };
@@ -480,6 +481,7 @@ export default function App() {
   const [restTimer, setRestTimer] = useState(() =>
     loadUserRestTimer(getUserStorageKey(currentUser))
   );
+  const [restAlertBanner, setRestAlertBanner] = useState(null);
 
   // Rest audio mode & Boxing Ring Bell sound toggle
   const [restAudioMode, setRestAudioModeState] = useState(() =>
@@ -496,6 +498,7 @@ export default function App() {
   const bellEnabledRef = useRef(bellEnabled);
   const firedTimerIdRef = useRef(null);
   const armedTimerIdRef = useRef(null);
+  const completeRestTimerAlertRef = useRef(null);
   const completedWorkoutIdsRef = useRef(new Set());
   const pendingUpdateUrlRef = useRef(null);
   const restTimerActiveRef = useRef(false);
@@ -585,6 +588,7 @@ export default function App() {
     cancelPendingCloudAutoSync();
     stopBakedRestTimerAudio();
     armedTimerIdRef.current = null;
+    setRestAlertBanner(null);
     setCurrentUser(userObj);
     if (userObj) {
       const uKey = getUserStorageKey(userObj);
@@ -774,9 +778,20 @@ export default function App() {
     return () => clearInterval(interval);
   }, [activeWorkout]);
 
+  // Auto-dismiss prominent in-app Rest Complete visual banner after 8.5s
+  useEffect(() => {
+    if (!restAlertBanner) return undefined;
+    const bannerTimer = setTimeout(() => {
+      setRestAlertBanner(null);
+    }, 8500);
+    return () => clearTimeout(bannerTimer);
+  }, [restAlertBanner]);
+
   // Persist restTimer across reloads / background kills & flush deferred remote update when idle
   useEffect(() => {
-    restTimerActiveRef.current = Boolean(restTimer.active && !restTimer.isPaused);
+    restTimerActiveRef.current = Boolean(
+      (restTimer.active && !restTimer.isPaused) || restAlertBanner
+    );
     if (currentUser) {
       try {
         if (restTimer.active) {
@@ -791,17 +806,77 @@ export default function App() {
         // Ignore storage errors
       }
     }
-    if (!restTimer.active && pendingUpdateUrlRef.current) {
+    if (!restTimer.active && !restAlertBanner && pendingUpdateUrlRef.current) {
       const targetUrl = pendingUpdateUrlRef.current;
       pendingUpdateUrlRef.current = null;
       window.location.replace(targetUrl);
     }
-  }, [restTimer, activeUserKey, currentUser]);
+  }, [restTimer, restAlertBanner, activeUserKey, currentUser]);
 
   // Keep screen awake via Screen Wake Lock while rest timer is actively counting down (and not paused)
   useEffect(() => {
     setRestAudioKeepAlive(restTimer.active && !restTimer.isPaused);
   }, [restTimer.active, restTimer.isPaused]);
+
+  // Authoritative, idempotent Rest Complete handler shared by baked audio stream & wall-clock ticker
+  const completeRestTimerAlert = useCallback(
+    ({ timerId, exerciseName = '', overdueMs = 0, fromStream = false } = {}) => {
+      if (!timerId || firedTimerIdRef.current === timerId) return;
+      firedTimerIdRef.current = timerId;
+
+      const safeOverdueMs = Math.max(0, Number(overdueMs) || 0);
+      const MAX_VISUAL_GRACE_MS = 15 * 60 * 1000;
+      const MAX_AUDIO_GRACE_MS = 120000;
+
+      const soundAllowed =
+        bellEnabledRef.current && getRestAudioMode() !== 'off';
+      const alreadyRung = hasTimerBellAlreadyRung(timerId);
+      const streamPlayingNow = isBakedRestAudioPlayingFor(timerId);
+
+      if (safeOverdueMs <= MAX_VISUAL_GRACE_MS) {
+        setRestAlertBanner({
+          timerId,
+          exerciseName: exerciseName || '',
+          overdueSec:
+            safeOverdueMs >= 5000 ? Math.round(safeOverdueMs / 1000) : 0,
+          triggeredAt: Date.now(),
+        });
+      }
+
+      // Never cut off the baked WAV stream while it is actively playing its ~1.5s bell tail
+      if (!fromStream && !streamPlayingNow) {
+        stopBakedRestTimerAudio();
+        if (!alreadyRung && soundAllowed && safeOverdueMs <= MAX_AUDIO_GRACE_MS) {
+          playGymSound('timerDone');
+        }
+      }
+
+      if (safeOverdueMs <= MAX_VISUAL_GRACE_MS) {
+        sendRestDoneNotification({
+          timerId,
+          exerciseName,
+          lang,
+          silent: !soundAllowed,
+        });
+      }
+
+      armedTimerIdRef.current = null;
+      setRestTimer((prev) =>
+        prev.active
+          ? {
+              ...prev,
+              active: false,
+              isPaused: false,
+              pausedRemainingMs: null,
+              endTime: null,
+              remaining: 0,
+            }
+          : prev
+      );
+    },
+    [lang]
+  );
+  completeRestTimerAlertRef.current = completeRestTimerAlert;
 
   // Re-arm baked WAV on next touch if restored after cold reload while counting down
   useEffect(() => {
@@ -819,6 +894,7 @@ export default function App() {
     }
 
     const expectedTimerId = restTimer.timerId;
+    const expectedExerciseName = restTimer.exerciseName;
     armRestAudioOnNextTap(() => {
       const msLeft = restTimer.endTime - Date.now();
       if (msLeft <= 150) return null;
@@ -827,15 +903,15 @@ export default function App() {
         timerId: expectedTimerId,
         remainingMs: msLeft,
         totalSec: restTimer.total,
-        exerciseName: restTimer.exerciseName,
+        exerciseName: expectedExerciseName,
         lang,
         onBellRung: (tid) => {
-          firedTimerIdRef.current = tid;
-          setRestTimer((prev) =>
-            prev.timerId === tid && prev.active
-              ? { ...EMPTY_REST_TIMER }
-              : prev
-          );
+          completeRestTimerAlertRef.current?.({
+            timerId: tid || expectedTimerId,
+            exerciseName: expectedExerciseName,
+            overdueMs: 0,
+            fromStream: true,
+          });
         },
         onSkipFromLockScreen: () => skipRestTimerRef.current?.(),
       };
@@ -851,11 +927,10 @@ export default function App() {
     lang,
   ]);
 
-  // Rest Timer Ticker (wall-clock endTime + 25s background grace window, zero double-bell vs baked WAV)
+  // Rest Timer Ticker (wall-clock endTime + 15m recovery grace window, zero double-bell vs baked WAV)
   useEffect(() => {
     if (!restTimer.active || restTimer.isPaused || !restTimer.endTime) return;
 
-    const GRACE_MS = 25000;
     const currentTimerId = restTimer.timerId;
     const targetEndTime = restTimer.endTime;
     const exLabel = restTimer.exerciseName;
@@ -865,36 +940,16 @@ export default function App() {
       const msLeft = targetEndTime - now;
 
       if (msLeft <= 0) {
-        const overdueMs = now - targetEndTime;
-        const alreadyRungByStream = hasTimerBellAlreadyRung(currentTimerId);
-        const streamCurrentlyPlaying =
-          isBakedRestAudioPlayingFor(currentTimerId);
-
-        if (firedTimerIdRef.current !== currentTimerId) {
-          firedTimerIdRef.current = currentTimerId;
-          const soundAllowed =
-            bellEnabledRef.current && getRestAudioMode() !== 'off';
-
-          // If the baked stream is NOT actively playing the bell right now (e.g., interrupted/cold reload/off), play fallback bell
-          if (!alreadyRungByStream && !streamCurrentlyPlaying) {
-            if (soundAllowed && overdueMs <= GRACE_MS) {
-              playGymSound('timerDone');
-            }
-          }
-          if (!alreadyRungByStream && overdueMs <= GRACE_MS) {
-            sendRestDoneNotification({
-              exerciseName: exLabel,
-              lang,
-              silent:
-                !soundAllowed ||
-                (typeof document !== 'undefined' &&
-                  document.visibilityState === 'visible'),
-            });
-          }
-        }
+        const overdueMs = Math.max(0, now - targetEndTime);
+        completeRestTimerAlert({
+          timerId: currentTimerId,
+          exerciseName: exLabel,
+          overdueMs,
+          fromStream: false,
+        });
 
         // Only stop baked audio if it is NOT actively inside/starting its bell tail
-        if (!streamCurrentlyPlaying) {
+        if (!isBakedRestAudioPlayingFor(currentTimerId)) {
           stopBakedRestTimerAudio();
         }
 
@@ -903,6 +958,8 @@ export default function App() {
             ? {
                 ...prev,
                 active: false,
+                isPaused: false,
+                pausedRemainingMs: null,
                 endTime: null,
                 remaining: 0,
               }
@@ -945,7 +1002,7 @@ export default function App() {
     restTimer.endTime,
     restTimer.timerId,
     restTimer.exerciseName,
-    lang,
+    completeRestTimerAlert,
   ]);
 
   const t = translations[lang] || translations.es;
@@ -1006,6 +1063,7 @@ export default function App() {
   const skipRestTimer = () => {
     stopBakedRestTimerAudio();
     armedTimerIdRef.current = null;
+    setRestAlertBanner(null);
     setRestTimer({ ...EMPTY_REST_TIMER });
   };
   skipRestTimerRef.current = skipRestTimer;
@@ -1024,10 +1082,12 @@ export default function App() {
       exerciseName,
       lang,
       onBellRung: (tid) => {
-        firedTimerIdRef.current = tid;
-        setRestTimer((prev) =>
-          prev.timerId === tid && prev.active ? { ...EMPTY_REST_TIMER } : prev
-        );
+        completeRestTimerAlertRef.current?.({
+          timerId: tid || timerId,
+          exerciseName,
+          overdueMs: 0,
+          fromStream: true,
+        });
       },
       onSkipFromLockScreen: () => skipRestTimerRef.current?.(),
     });
@@ -1035,6 +1095,7 @@ export default function App() {
 
   const startRestTimer = (seconds, exerciseName = '') => {
     unlockGymAudio();
+    setRestAlertBanner(null);
     const cleanSec = Math.max(1, Number(seconds) || 60);
     const timerId = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const remainingMs = cleanSec * 1000;
@@ -1050,6 +1111,21 @@ export default function App() {
       total: cleanSec,
       exerciseName,
     });
+
+    try {
+      if (
+        bellEnabledRef.current &&
+        getNotificationPermissionState() === 'default' &&
+        localStorage.getItem('alfa_gym_notif_prompted_v1') !== '1'
+      ) {
+        localStorage.setItem('alfa_gym_notif_prompted_v1', '1');
+        requestGymNotificationPermission()
+          .then((perm) => setNotifPermission(perm))
+          .catch(() => {});
+      }
+    } catch {
+      // Ignore storage/permission errors
+    }
   };
 
   const adjustRestTimer = (deltaSeconds) => {
@@ -1206,6 +1282,7 @@ export default function App() {
       }
     } else {
       unlockGymAudio();
+      playGymSound('timerDone');
     }
   };
 
@@ -1255,8 +1332,14 @@ export default function App() {
   };
 
   const handlePreviewBellSound = () => {
+    unlockGymAudio();
     if (!bellEnabled) {
+      bellEnabledRef.current = true;
       setBellEnabled(true);
+      if (restAudioMode === 'off') {
+        setRestAudioMode('background');
+        setRestAudioModeState('background');
+      }
     }
     playGymSound('timerDone');
   };
@@ -1575,6 +1658,48 @@ export default function App() {
         isLiveWorkoutScreen ? 'live-locked-shell' : ''
       }`}
     >
+      {/* Global In-App Rest Complete Visual Alert Banner */}
+      {restAlertBanner && (
+        <div
+          className="rest-alert-toast"
+          role="status"
+          aria-live="assertive"
+          onClick={() => setRestAlertBanner(null)}
+        >
+          <div className="rest-alert-left">
+            <div className="rest-alert-icon-wrap" aria-hidden="true">
+              <Bell size={18} />
+            </div>
+            <div className="rest-alert-text">
+              <strong className="rest-alert-title">
+                {lang === 'es'
+                  ? '🔔 ¡Descanso terminado!'
+                  : '🔔 Rest Complete!'}
+              </strong>
+              <span className="rest-alert-sub">
+                {restAlertBanner.exerciseName
+                  ? lang === 'es'
+                    ? `Siguiente serie: ${restAlertBanner.exerciseName}`
+                    : `Next set: ${restAlertBanner.exerciseName}`
+                  : lang === 'es'
+                  ? '¡Tiempo cumplido! A darle a la siguiente serie'
+                  : 'Time is up! Ready for your next set'}
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="rest-alert-dismiss-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              setRestAlertBanner(null);
+            }}
+          >
+            {lang === 'es' ? '¡Listo! ✓' : 'Got it ✓'}
+          </button>
+        </div>
+      )}
+
       {/* Top Navigation Header */}
       <header className="alfa-header">
         <div

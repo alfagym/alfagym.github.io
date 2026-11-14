@@ -15,15 +15,23 @@ self.addEventListener('message', (event) => {
 
   const title = data.title || 'Alfa Gym';
   const body = data.body || '¡Tiempo de descanso terminado!';
+  const tag = data.tag || `alfa-rest-${Date.now()}`;
+  const icon = data.icon || new URL('./apple-touch-icon.png', self.location.href).href;
   event.waitUntil(
-    self.registration.showNotification(title, {
-      body,
-      icon: './apple-touch-icon.png',
-      badge: './apple-touch-icon.png',
-      tag: 'alfa-rest-timer',
-      renotify: true,
-      silent: Boolean(data.silent),
-    })
+    self.registration
+      .showNotification(title, {
+        body,
+        icon,
+        tag,
+        silent: Boolean(data.silent),
+      })
+      .catch(() =>
+        self.registration.showNotification(title, {
+          body,
+          tag,
+          silent: Boolean(data.silent),
+        })
+      )
   );
 });
 

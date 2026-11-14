@@ -61,7 +61,7 @@ import AccountModal from './components/AccountModal';
 import './App.css';
 
 /* global __BUILD_TIMESTAMP__ */
-const FALLBACK_TIMESTAMP = '10:40 AM - 11/14/2026';
+const FALLBACK_TIMESTAMP = '11:07 AM - 11/14/2026';
 const BUILD_TIMESTAMP =
   typeof __BUILD_TIMESTAMP__ !== 'undefined'
     ? __BUILD_TIMESTAMP__
@@ -885,7 +885,10 @@ export default function App() {
             sendRestDoneNotification({
               exerciseName: exLabel,
               lang,
-              silent: soundAllowed,
+              silent:
+                !soundAllowed ||
+                (typeof document !== 'undefined' &&
+                  document.visibilityState === 'visible'),
             });
           }
         }

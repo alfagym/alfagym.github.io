@@ -3766,6 +3766,38 @@
 }
 
 /* ==========================================================================
+   GLOBAL NATIVE APP FEEL: TEXT SELECTION & TOUCH CALLOUT SUPPRESSION (iOS PWA)
+   ========================================================================== */
+html,
+body,
+#root,
+.alfa-app-shell,
+.alfa-app-shell *,
+.modal-backdrop,
+.modal-backdrop *,
+.alfa-confirm-backdrop,
+.alfa-confirm-backdrop *,
+.alfa-drag-follower-portal,
+.alfa-drag-follower-portal * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+img {
+  -webkit-user-drag: none;
+}
+
+/* Strictly preserve text selection, typing and native text callouts in editable controls */
+input,
+textarea,
+[contenteditable="true"] {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+  -webkit-touch-callout: default !important;
+}
+
+/* ==========================================================================
    LONG-PRESS EXERCISE DRAG & REORDER (iOS PWA + DESKTOP)
    ========================================================================== */
 .ex-drag-handle {
@@ -3915,6 +3947,222 @@ body.alfa-dragging-active * {
   background: rgba(29, 140, 248, 0.16);
   border-radius: 8px;
   outline: 1px dashed #38bdf8;
+}
+
+/* ==========================================================================
+   COMPACT LIST REORDER MODE (.is-compact-reorder-list / .is-compact-reorder)
+   ========================================================================== */
+/* Non-compact mode: hide compact-only badges */
+.compact-drag-idx-badge,
+.compact-drag-sets-pill {
+  display: none;
+}
+
+/* Compact Reorder Containers */
+.live-exercises-stack.is-compact-reorder-list,
+.routine-editor-ex-list.is-compact-reorder-list {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 8px !important;
+}
+
+.live-exercises-stack.is-compact-reorder-list .add-exercise-main-btn,
+.live-exercises-stack.is-compact-reorder-list .empty-workout-placeholder {
+  display: none !important;
+}
+
+/* Compact Reorder Cards (~50px single horizontal row) */
+.live-exercise-card.is-compact-reorder,
+.routine-draft-ex-box.is-compact-reorder {
+  transition: none !important;
+  padding: 8px 12px !important;
+  min-height: 50px !important;
+  border-radius: 12px !important;
+  margin: 0 !important;
+  gap: 0 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3) !important;
+  background: var(--bg-card) !important;
+}
+
+/* Live Workout: Hide secondary children in compact mode */
+.live-exercise-card.is-compact-reorder .live-ex-controls,
+.live-exercise-card.is-compact-reorder .live-ex-tags,
+.live-exercise-card.is-compact-reorder .superset-badge,
+.live-exercise-card.is-compact-reorder .inline-plate-popover,
+.live-exercise-card.is-compact-reorder .ex-pinned-note-input,
+.live-exercise-card.is-compact-reorder .live-ex-notes-wrap,
+.live-exercise-card.is-compact-reorder .hevy-sets-table,
+.live-exercise-card.is-compact-reorder .add-set-row-btn,
+.live-exercise-card.is-compact-reorder .add-set-btn {
+  display: none !important;
+}
+
+/* Live Workout: Align header into a single clean horizontal row */
+.live-exercise-card.is-compact-reorder .live-ex-card-header {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  flex-wrap: nowrap !important;
+  gap: 8px !important;
+  width: 100% !important;
+  margin-bottom: 0 !important;
+}
+
+.live-exercise-card.is-compact-reorder .live-ex-title-with-thumb {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+
+.live-exercise-card.is-compact-reorder .hevy-ex-thumb,
+.live-exercise-card.is-compact-reorder .thumb-fallback-icon {
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: 6px !important;
+  flex-shrink: 0 !important;
+}
+
+.live-exercise-card.is-compact-reorder .live-ex-title-group {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+
+.live-exercise-card.is-compact-reorder .live-ex-heading-row {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  margin-bottom: 0 !important;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+
+.live-exercise-card.is-compact-reorder .live-ex-heading-row h3 {
+  margin: 0 !important;
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  color: #f8fafc !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+
+/* Routine Editor: Hide secondary children in compact mode */
+.routine-draft-ex-box.is-compact-reorder .draft-ex-swap-pill,
+.routine-draft-ex-box.is-compact-reorder .draft-ex-actions,
+.routine-draft-ex-box.is-compact-reorder .draft-ex-Order-actions,
+.routine-draft-ex-box.is-compact-reorder .draft-ex-meta-row,
+.routine-draft-ex-box.is-compact-reorder .draft-rest-row,
+.routine-draft-ex-box.is-compact-reorder .draft-sets-table,
+.routine-draft-ex-box.is-compact-reorder .routine-draft-sets-table,
+.routine-draft-ex-box.is-compact-reorder .draft-sets-mini-grid,
+.routine-draft-ex-box.is-compact-reorder .draft-add-set-btn {
+  display: none !important;
+}
+
+/* Routine Editor: Align header into a single clean horizontal row */
+.routine-draft-ex-box.is-compact-reorder .draft-ex-header {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  flex-wrap: nowrap !important;
+  gap: 8px !important;
+  width: 100% !important;
+  margin-bottom: 0 !important;
+}
+
+.routine-draft-ex-box.is-compact-reorder .draft-ex-title-wrap {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+
+.routine-draft-ex-box.is-compact-reorder .routine-line-thumb,
+.routine-draft-ex-box.is-compact-reorder .thumb-fallback-icon {
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: 6px !important;
+  flex-shrink: 0 !important;
+}
+
+.routine-draft-ex-box.is-compact-reorder .draft-ex-name-handle {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  border: none !important;
+}
+
+.routine-draft-ex-box.is-compact-reorder .draft-ex-name-label {
+  margin: 0 !important;
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  color: #f8fafc !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+
+/* Compact Badges & Pills */
+.compact-drag-idx-badge,
+.draft-ex-index-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(56, 189, 248, 0.16);
+  color: #38bdf8;
+  font-size: 11.5px;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 5px;
+  flex-shrink: 0;
+  letter-spacing: 0.02em;
+}
+
+.compact-drag-sets-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(148, 163, 184, 0.14);
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* Explicit display in compact mode */
+.live-exercise-card.is-compact-reorder .compact-drag-idx-badge,
+.live-exercise-card.is-compact-reorder .compact-drag-sets-pill,
+.routine-draft-ex-box.is-compact-reorder .compact-drag-sets-pill {
+  display: inline-flex !important;
+}
+
+/* Highlight the active dragging card in compact mode */
+.live-exercise-card.is-compact-reorder.is-dragging-card,
+.routine-draft-ex-box.is-compact-reorder.is-dragging-card {
+  border-color: #38bdf8 !important;
+  background: rgba(29, 140, 248, 0.18) !important;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.45),
+    0 8px 20px rgba(2, 8, 23, 0.65) !important;
+  transform: scale(1.02);
+  z-index: 10;
 }
 
 .alfa-drag-follower-portal {

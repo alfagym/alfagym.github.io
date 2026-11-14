@@ -1,5 +1,5 @@
-// Authentic Stereo 2-Strike Gym Bell ("DING-DING!") & Resilient iOS PWA Audio Engine
-// Works 100% offline & through iPhone Vibrate-Only / Silent Mode without cutting Spotify on set checkmarks
+// Authentic Stereo 2-Strike Gym Bell ("DING-DING!") & Ambient-Only Web Audio Engine
+// Keeps navigator.audioSession.type locked to 'ambient' (MixWithOthers) so Spotify/Apple Music never pause.
 
 import {
   BOXING_BELL_SAMPLE_RATE,
@@ -12,122 +12,42 @@ const SILENT_LEAD_IN_SEC = BOXING_BELL_LEAD_IN_SEC;
 const BELL_DURATION_SEC = BOXING_BELL_DURATION_SEC;
 
 let sharedAudioCtx = null;
-let uiCtxSuspendTimer = null;
 let cachedBellAudioBuffer = null;
 
-let bellAudioEl = null;
-let bellAudioUnlocked = false;
-let bellUnlockInFlight = false;
-let needsReprimeAfterBackground = false;
 let isBellCurrentlyRinging = false;
 let activeRingToken = 0;
+let activeImmediateBell = null;
 let cleanupRingTimeoutId = null;
 
 let wakeLockSentinel = null;
 let wakeLockDesired = false;
 let globalUnlockInstalled = false;
 
-export const REST_AUDIO_MODES = ['background', 'music100', 'lockscreen', 'off'];
+export const REST_AUDIO_MODES = ['background', 'off'];
 const REST_AUDIO_MODE_KEY = 'alfa_gym_rest_audio_mode';
-const BAKED_SAMPLE_RATE = 22050;
-const MAX_BAKED_SEC = 360;
-const IS_LITTLE_ENDIAN =
-  typeof Uint16Array !== 'undefined'
-    ? new Uint8Array(new Uint16Array([1]).buffer)[0] === 1
-    : true;
 
 let currentRestAudioModeCache = null;
-let cachedBellMono22kPcm = null;
-let cachedDitherChunk = null;
-let isRestAudioActive = false;
-let restTimerAudioEl = null;
-let activeRestBlobUrl = null;
-let restAudioGenId = 0;
-let restAudioConfig = null;
+let scheduleToken = 0;
+let activeScheduledRest = null;
 let coldRearmCleanup = null;
 let swRegistrationPromise = null;
 const rungTimerIds = new Set();
 
-export function getRestAudioMode() {
-  if (currentRestAudioModeCache && REST_AUDIO_MODES.includes(currentRestAudioModeCache)) {
-    return currentRestAudioModeCache;
-  }
+function lockAmbientAudioSession() {
   try {
-    const saved =
-      typeof localStorage !== 'undefined'
-        ? localStorage.getItem(REST_AUDIO_MODE_KEY)
-        : null;
-    if (saved && REST_AUDIO_MODES.includes(saved)) {
-      currentRestAudioModeCache = saved;
-      return saved;
-    }
-  } catch {
-    // Ignore storage read errors
-  }
-  currentRestAudioModeCache = 'background';
-  return 'background';
-}
-
-export function setRestAudioMode(mode) {
-  const valid = REST_AUDIO_MODES.includes(mode) ? mode : 'background';
-  currentRestAudioModeCache = valid;
-  try {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(REST_AUDIO_MODE_KEY, valid);
-    }
-  } catch {
-    // Ignore storage write errors
-  }
-  return valid;
-}
-
-function markRestBellRung(timerId) {
-  if (!timerId) return;
-  if (rungTimerIds.size > 40) {
-    const first = rungTimerIds.values().next().value;
-    rungTimerIds.delete(first);
-  }
-  rungTimerIds.add(timerId);
-}
-
-export function hasTimerBellAlreadyRung(timerId) {
-  return Boolean(timerId && rungTimerIds.has(timerId));
-}
-
-export function isBakedRestAudioPlayingFor(timerId) {
-  return Boolean(
-    timerId &&
-      isRestAudioActive &&
-      restAudioConfig?.timerId === timerId &&
-      restTimerAudioEl &&
-      !restTimerAudioEl.paused &&
-      !restTimerAudioEl.ended
-  );
-}
-
-function setAudioSessionTypeSafe(type) {
-  if (
-    typeof navigator !== 'undefined' &&
-    'audioSession' in navigator &&
-    navigator.audioSession
-  ) {
-    try {
-      if (navigator.audioSession.type !== type) {
-        navigator.audioSession.type = type;
+    if (
+      typeof navigator !== 'undefined' &&
+      'audioSession' in navigator &&
+      navigator.audioSession &&
+      'type' in navigator.audioSession
+    ) {
+      if (navigator.audioSession.type !== 'ambient') {
+        navigator.audioSession.type = 'ambient';
       }
-      return true;
-    } catch {
-      return false;
     }
+  } catch {
+    // Safari/browser without AudioSession API
   }
-  return false;
-}
-
-function releasePlaybackSessionToAuto() {
-  // Step 'playback' -> 'ambient' -> 'auto' so WebKit GPUProcess releases
-  // AVAudioSessionCategoryPlayback immediately while leaving 'auto' clean in rest state
-  setAudioSessionTypeSafe('ambient');
-  setAudioSessionTypeSafe('auto');
 }
 
 function getOrCreateAudioContext() {
@@ -136,13 +56,14 @@ function getOrCreateAudioContext() {
   if (!AudioCtx) return null;
   if (!sharedAudioCtx || sharedAudioCtx.state === 'closed') {
     sharedAudioCtx = new AudioCtx();
+    cachedBellAudioBuffer = null;
   }
   return sharedAudioCtx;
 }
 
 /**
  * Lazily decodes the stereo 16-bit PCM frames directly from BOXING_BELL_WAV_DATA_URI
- * (skipping the 250ms silent lead-in) for the emergency WebAudio fallback without duplicating bundle bytes.
+ * (skipping the 250ms silent lead-in) into a reusable Web Audio AudioBuffer.
  */
 function getBoxingBellAudioBuffer(ctx) {
   if (cachedBellAudioBuffer) return cachedBellAudioBuffer;
@@ -181,59 +102,150 @@ function getBoxingBellAudioBuffer(ctx) {
   return buffer;
 }
 
-function finishBellSession(token) {
-  if (token !== undefined && token !== activeRingToken) return;
-  isBellCurrentlyRinging = false;
+function disconnectNodeSafe(node) {
+  if (!node) return;
+  try {
+    node.disconnect();
+  } catch {
+    // ignore disconnect errors
+  }
+}
+
+function stopAudioSourceSafe(node) {
+  if (!node) return;
+  try {
+    // Detach onended BEFORE stop() so manual cancellations never invoke completion handlers
+    node.onended = null;
+  } catch {
+    // ignore
+  }
+  try {
+    node.stop();
+  } catch {
+    // ignore if unstarted or already stopped
+  }
+  disconnectNodeSafe(node);
+}
+
+function clearImmediateBell() {
   if (cleanupRingTimeoutId) {
     clearTimeout(cleanupRingTimeoutId);
     cleanupRingTimeoutId = null;
   }
-  if (bellAudioEl) {
-    try {
-      if (!bellAudioEl.paused) {
-        bellAudioEl.pause();
-      }
-      if (bellAudioEl.readyState >= 1) {
-        bellAudioEl.currentTime = SILENT_LEAD_IN_SEC;
-      }
-    } catch {
-      // ignore seek errors
-    }
+  const current = activeImmediateBell;
+  activeImmediateBell = null;
+  if (current) {
+    stopAudioSourceSafe(current.source);
+    disconnectNodeSafe(current.gain);
   }
-  releasePlaybackSessionToAuto();
+  isBellCurrentlyRinging = false;
 }
 
-function ensureBellAudioElement() {
-  if (typeof window === 'undefined' || typeof Audio === 'undefined') return null;
-  if (bellAudioEl && !bellAudioEl.error) return bellAudioEl;
+function cancelScheduledRestAudio() {
+  scheduleToken += 1;
+  const active = activeScheduledRest;
+  activeScheduledRest = null;
+  if (active) {
+    stopAudioSourceSafe(active.source);
+    disconnectNodeSafe(active.gain);
+  }
+}
 
-  // Immutable Base64 stereo WAV Data URI: immune to iOS Home Screen PWA BlobRegistry eviction
-  const el = new Audio(BOXING_BELL_WAV_DATA_URI);
-  el.preload = 'auto';
-  el.playsInline = true;
-  el.volume = 1.0;
-  // MUST remain false so WebKit clears RequireUserGestureForAudioRateChange on unlock
-  el.muted = false;
+function clearColdRearmListener() {
+  if (typeof coldRearmCleanup === 'function') {
+    coldRearmCleanup();
+    coldRearmCleanup = null;
+  }
+}
 
-  el.addEventListener('timeupdate', () => {
-    // Hard safety guard: during silent gesture unlock, never allow playhead past 120ms of the 250ms silent lead-in
-    if (bellUnlockInFlight && !isBellCurrentlyRinging && el.currentTime >= 0.12) {
-      el.pause();
+function normalizeRestAudioMode(mode) {
+  return mode === 'off' ? 'off' : 'background';
+}
+
+export function getRestAudioMode() {
+  if (
+    currentRestAudioModeCache &&
+    REST_AUDIO_MODES.includes(currentRestAudioModeCache)
+  ) {
+    return currentRestAudioModeCache;
+  }
+  try {
+    const saved =
+      typeof localStorage !== 'undefined'
+        ? localStorage.getItem(REST_AUDIO_MODE_KEY)
+        : null;
+    if (saved === 'off') {
+      currentRestAudioModeCache = 'off';
+      return 'off';
     }
-  });
+    if (saved === 'music100' || saved === 'lockscreen') {
+      currentRestAudioModeCache = 'background';
+      try {
+        localStorage.setItem(REST_AUDIO_MODE_KEY, 'background');
+      } catch {
+        // Ignore storage write errors
+      }
+      return 'background';
+    }
+    if (saved === 'background') {
+      currentRestAudioModeCache = 'background';
+      return 'background';
+    }
+  } catch {
+    // Ignore storage read errors
+  }
+  currentRestAudioModeCache = 'background';
+  return 'background';
+}
 
-  el.addEventListener('ended', () => {
-    finishBellSession(activeRingToken);
-  });
+export function setRestAudioMode(mode) {
+  const valid = normalizeRestAudioMode(mode);
+  currentRestAudioModeCache = valid;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(REST_AUDIO_MODE_KEY, valid);
+    }
+  } catch {
+    // Ignore storage write errors
+  }
+  return valid;
+}
 
-  bellAudioEl = el;
-  bellAudioUnlocked = false;
-  return bellAudioEl;
+function markRestBellRung(timerId) {
+  if (!timerId) return;
+  if (rungTimerIds.size > 40) {
+    const first = rungTimerIds.values().next().value;
+    rungTimerIds.delete(first);
+  }
+  rungTimerIds.add(timerId);
+}
+
+export function hasTimerBellAlreadyRung(timerId) {
+  return Boolean(timerId && rungTimerIds.has(timerId));
+}
+
+export function isBakedRestAudioPlayingFor(timerId) {
+  if (!timerId || !activeScheduledRest) return false;
+  if (activeScheduledRest.timerId !== timerId) return false;
+  if (hasTimerBellAlreadyRung(timerId)) return false;
+  if (!sharedAudioCtx || sharedAudioCtx.state !== 'running') return false;
+  if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+    return false;
+  }
+  const now = Date.now();
+  return (
+    now >= activeScheduledRest.expectedWallEndMs - 200 &&
+    now <= activeScheduledRest.expectedBellFinishWallMs + 350
+  );
 }
 
 async function acquireWakeLockSafe() {
   if (!wakeLockDesired || wakeLockSentinel) return;
-  if (typeof navigator === 'undefined' || !('wakeLock' in navigator) || !navigator.wakeLock) {
+  if (
+    typeof navigator === 'undefined' ||
+    !('wakeLock' in navigator) ||
+    !navigator.wakeLock
+  ) {
     return;
   }
   if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
@@ -273,99 +285,51 @@ async function releaseWakeLockSafe() {
 }
 
 /**
- * Called synchronously inside user gesture handlers (touchend / click / keydown).
- * Blesses the persistent HTMLAudioElement using its 250ms 0x0000 silent lead-in under 'ambient'
- * so Spotify/Apple Music is NEVER interrupted on set checkmarks, then parks at 0.25s in 'auto'.
+ * Unlocks Web Audio inside user gesture handlers under permanent 'ambient' AudioSession
+ * without ever suspending the AudioContext or pausing external music.
  */
 export function unlockGymAudio() {
+  lockAmbientAudioSession();
+
   try {
     if (wakeLockDesired && !wakeLockSentinel) {
       acquireWakeLockSafe();
     }
 
-    const el = ensureBellAudioElement();
-    if (!el) return;
+    const ctx = getOrCreateAudioContext();
+    if (!ctx) return false;
 
-    // Never collide with an active bell ring, baked rest stream, or an already in-flight unlock
-    if (isBellCurrentlyRinging || isRestAudioActive || bellUnlockInFlight) return;
+    if (ctx.state !== 'running') {
+      try {
+        const resumePromise = ctx.resume();
+        if (resumePromise && typeof resumePromise.catch === 'function') {
+          resumePromise.catch(() => {});
+        }
+      } catch {
+        // ignore resume errors
+      }
 
-    const shouldPrime =
-      !bellAudioUnlocked ||
-      needsReprimeAfterBackground ||
-      el.error !== null ||
-      el.readyState < 1;
-
-    if (!shouldPrime) return;
-
-    const ringAtStart = activeRingToken;
-    bellUnlockInFlight = true;
-
-    // Use 'ambient' ONLY during the ~20ms silent 0x0000 blessing so Spotify never pauses on tap
-    setAudioSessionTypeSafe('ambient');
-    el.muted = false;
-    el.volume = 1.0;
-
-    try {
-      el.currentTime = 0;
-    } catch {
-      // ignore if metadata is still parsing
-    }
-
-    const playPromise = el.play();
-    if (playPromise && typeof playPromise.then === 'function') {
-      playPromise
-        .then(() => {
-          bellUnlockInFlight = false;
-          bellAudioUnlocked = true;
-          needsReprimeAfterBackground = false;
-          // Abort cleanup if playBoxingRingBell() took over while unlock promise was resolving
-          if (
-            ringAtStart !== activeRingToken ||
-            isBellCurrentlyRinging ||
-            isRestAudioActive
-          ) {
-            return;
-          }
-          el.pause();
-          try {
-            if (el.readyState >= 1) {
-              el.currentTime = SILENT_LEAD_IN_SEC;
-            }
-          } catch {
-            // ignore
-          }
-          setAudioSessionTypeSafe('auto');
-        })
-        .catch(() => {
-          bellUnlockInFlight = false;
-          if (
-            ringAtStart !== activeRingToken ||
-            isBellCurrentlyRinging ||
-            isRestAudioActive
-          ) {
-            return;
-          }
-          setAudioSessionTypeSafe('auto');
-        });
-    } else {
-      bellUnlockInFlight = false;
-      bellAudioUnlocked = true;
-      needsReprimeAfterBackground = false;
-      if (
-        ringAtStart === activeRingToken &&
-        !isBellCurrentlyRinging &&
-        !isRestAudioActive
-      ) {
-        el.pause();
-        setAudioSessionTypeSafe('auto');
+      try {
+        const silentBuffer = ctx.createBuffer(1, 1, 22050);
+        const silentSource = ctx.createBufferSource();
+        silentSource.buffer = silentBuffer;
+        silentSource.connect(ctx.destination);
+        silentSource.onended = () => {
+          disconnectNodeSafe(silentSource);
+        };
+        silentSource.start(0);
+      } catch {
+        // ignore silent unlock errors
       }
     }
+    return true;
   } catch {
-    bellUnlockInFlight = false;
+    return false;
   }
 }
 
 export function installGlobalAudioUnlock() {
+  lockAmbientAudioSession();
   if (globalUnlockInstalled || typeof window === 'undefined') return;
   globalUnlockInstalled = true;
 
@@ -389,44 +353,19 @@ export function installGlobalAudioUnlock() {
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') {
-        needsReprimeAfterBackground = true;
-        if (
-          isRestAudioActive &&
-          restAudioConfig &&
-          restAudioConfig.mode === 'music100'
-        ) {
-          setAudioSessionTypeSafe('transient');
-        }
+        // Prevent frozen iOS background ctx.currentTime from firing a stale bell on return
+        cancelScheduledRestAudio();
       } else if (document.visibilityState === 'visible') {
+        lockAmbientAudioSession();
         if (wakeLockDesired && !wakeLockSentinel) {
           acquireWakeLockSafe();
-        }
-        if (
-          isRestAudioActive &&
-          restTimerAudioEl &&
-          restAudioConfig &&
-          restAudioConfig.mode === 'music100' &&
-          restTimerAudioEl.currentTime <
-            Math.max(0, restAudioConfig.silenceSeconds - 2)
-        ) {
-          setAudioSessionTypeSafe('ambient');
-        }
-        if (bellAudioEl && bellAudioEl.error) {
-          bellAudioEl = null;
-          bellAudioUnlocked = false;
         }
       }
     });
   }
 
   window.addEventListener('pagehide', () => {
-    if (
-      isRestAudioActive &&
-      restAudioConfig &&
-      restAudioConfig.mode === 'music100'
-    ) {
-      setAudioSessionTypeSafe('transient');
-    }
+    cancelScheduledRestAudio();
   });
 }
 
@@ -443,659 +382,249 @@ export function setRestAudioKeepAlive(active) {
   acquireWakeLockSafe();
 }
 
-function triggerWebAudioBellFallback(token) {
+export function playBoxingRingBell() {
+  lockAmbientAudioSession();
+
+  try {
+    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+      navigator.vibrate([100, 155, 220]);
+    }
+  } catch {
+    // ignore vibrate errors
+  }
+
   try {
     const ctx = getOrCreateAudioContext();
-    if (!ctx) {
-      finishBellSession(token);
-      return;
-    }
-    if (uiCtxSuspendTimer) {
-      clearTimeout(uiCtxSuspendTimer);
-      uiCtxSuspendTimer = null;
-    }
-    setAudioSessionTypeSafe(
-      getRestAudioMode() === 'lockscreen' ? 'playback' : 'transient'
-    );
+    if (!ctx) return false;
 
-    const startBuffer = () => {
+    clearImmediateBell();
+    const token = ++activeRingToken;
+    isBellCurrentlyRinging = true;
+
+    const startImmediateBell = () => {
       if (token !== activeRingToken) return;
-      const buffer = getBoxingBellAudioBuffer(ctx);
-      const source = ctx.createBufferSource();
-      const masterGain = ctx.createGain();
-      source.buffer = buffer;
-      masterGain.gain.setValueAtTime(1.0, ctx.currentTime);
-      source.connect(masterGain);
-      masterGain.connect(ctx.destination);
-      source.onended = () => {
-        finishBellSession(token);
-        try {
-          if (ctx.state === 'running' && !isBellCurrentlyRinging) {
-            ctx.suspend().catch(() => {});
+      try {
+        const buffer = getBoxingBellAudioBuffer(ctx);
+        const source = ctx.createBufferSource();
+        const masterGain = ctx.createGain();
+        source.buffer = buffer;
+        masterGain.gain.setValueAtTime(1.0, ctx.currentTime);
+        source.connect(masterGain);
+        masterGain.connect(ctx.destination);
+
+        activeImmediateBell = { source, gain: masterGain };
+
+        source.onended = () => {
+          if (token !== activeRingToken) return;
+          activeImmediateBell = null;
+          disconnectNodeSafe(source);
+          disconnectNodeSafe(masterGain);
+          isBellCurrentlyRinging = false;
+          if (cleanupRingTimeoutId) {
+            clearTimeout(cleanupRingTimeoutId);
+            cleanupRingTimeoutId = null;
           }
-        } catch {
-          // ignore
+        };
+
+        source.start(0);
+
+        const durationMs = Math.round(
+          (Number.isFinite(buffer?.duration) && buffer.duration > 0
+            ? buffer.duration
+            : BELL_DURATION_SEC) * 1000
+        );
+        cleanupRingTimeoutId = setTimeout(() => {
+          if (token !== activeRingToken) return;
+          clearImmediateBell();
+        }, durationMs + 400);
+      } catch {
+        if (token === activeRingToken) {
+          clearImmediateBell();
         }
-      };
-      source.start(0);
+      }
     };
 
     if (ctx.state === 'running') {
-      startBuffer();
-    } else {
-      ctx
-        .resume()
-        .then(startBuffer)
-        .catch(() => finishBellSession(token));
-    }
-  } catch {
-    finishBellSession(token);
-  }
-}
-
-/**
- * Rings the authentic 2-strike stereo gym bell ("DING-DING!") audibly
- * EVEN WHEN iPHONE IS IN VIBRATE-ONLY / SILENT MODE.
- */
-export function playBoxingRingBell() {
-  try {
-    // Tactile 2-strike vibration calibrated to exact strike 1 (0ms) and strike 2 (255ms)
-    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
-      try {
-        navigator.vibrate([100, 155, 220]);
-      } catch {
-        // ignore
-      }
+      startImmediateBell();
+      return true;
     }
 
-    const token = ++activeRingToken;
-    isBellCurrentlyRinging = true;
-    bellUnlockInFlight = false;
-
-    if (cleanupRingTimeoutId) {
-      clearTimeout(cleanupRingTimeoutId);
-      cleanupRingTimeoutId = null;
-    }
-
-    // Suspend any lingering UI WebAudio context so AVPlayer owns the audio route cleanly
-    if (sharedAudioCtx && sharedAudioCtx.state === 'running') {
-      try {
-        sharedAudioCtx.suspend().catch(() => {});
-      } catch {
-        // ignore
-      }
-    }
-
-    // 'transient' bypasses hardware Ring/Silent switch & survives speakers/AirPods WITHOUT pausing Spotify;
-    // 'playback' is used only when user explicitly selects Lock Screen Widget mode.
-    setAudioSessionTypeSafe(
-      getRestAudioMode() === 'lockscreen' ? 'playback' : 'transient'
-    );
-
-    const el = ensureBellAudioElement();
-    if (!el) {
-      triggerWebAudioBellFallback(token);
-      return;
-    }
-
-    el.muted = false;
-    el.volume = 1.0;
-
-    try {
-      if (!el.paused) {
-        el.pause();
-      }
-      if (
-        el.readyState >= 1 &&
-        (!el.seekable ||
-          el.seekable.length === 0 ||
-          el.seekable.end(0) >= SILENT_LEAD_IN_SEC)
-      ) {
-        el.currentTime = SILENT_LEAD_IN_SEC;
-      } else {
-        el.currentTime = 0;
-      }
-    } catch {
-      // Plays seamlessly through the 250ms silent prefix if seek is not ready yet
-    }
-
-    const safetyMs = Math.ceil(
-      (BELL_DURATION_SEC + SILENT_LEAD_IN_SEC + 0.35) * 1000
-    );
-    cleanupRingTimeoutId = setTimeout(() => {
-      finishBellSession(token);
-    }, safetyMs);
-
-    const playPromise = el.play();
-    if (playPromise && typeof playPromise.then === 'function') {
-      playPromise
+    const resumePromise = ctx.resume();
+    if (resumePromise && typeof resumePromise.then === 'function') {
+      resumePromise
         .then(() => {
-          bellAudioUnlocked = true;
-          needsReprimeAfterBackground = false;
+          if (token !== activeRingToken) return;
+          if (ctx.state === 'running') {
+            startImmediateBell();
+          } else {
+            clearImmediateBell();
+          }
         })
         .catch(() => {
-          triggerWebAudioBellFallback(token);
+          if (token === activeRingToken) {
+            clearImmediateBell();
+          }
         });
-    } else {
-      bellAudioUnlocked = true;
+      return true;
     }
+
+    if (ctx.state === 'running') {
+      startImmediateBell();
+      return true;
+    }
+
+    clearImmediateBell();
+    return false;
   } catch {
-    isBellCurrentlyRinging = false;
-    releasePlaybackSessionToAuto();
+    clearImmediateBell();
+    return false;
   }
 }
 
 export function playGymSound(type = 'check') {
-  try {
-    if (type === 'timerDone' || type === 'boxingBell') {
-      playBoxingRingBell();
-      return;
-    }
-
-    if (!isBellCurrentlyRinging && !isRestAudioActive) {
-      setAudioSessionTypeSafe('ambient');
-    }
-
-    const ctx = getOrCreateAudioContext();
-    if (!ctx) return;
-    if (ctx.state === 'suspended' || ctx.state === 'interrupted') {
-      ctx.resume().catch(() => {});
-    }
-    const now = ctx.currentTime;
-
-    if (type === 'check') {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(587.33, now); // D5
-      osc.frequency.exponentialRampToValueAtTime(880, now + 0.11); // A5
-      gain.gain.setValueAtTime(0.12, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(now);
-      osc.stop(now + 0.17);
-    } else if (type === 'pr') {
-      const notes = [523.25, 659.25, 783.99, 1046.5]; // C5 E5 G5 C6
-      notes.forEach((freq, idx) => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(freq, now + idx * 0.08);
-        gain.gain.setValueAtTime(0.16, now + idx * 0.08);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 0.25);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(now + idx * 0.08);
-        osc.stop(now + idx * 0.08 + 0.26);
-      });
-    }
-
-    if (uiCtxSuspendTimer) {
-      clearTimeout(uiCtxSuspendTimer);
-    }
-    uiCtxSuspendTimer = setTimeout(() => {
-      uiCtxSuspendTimer = null;
-      if (!isBellCurrentlyRinging && !isRestAudioActive) {
-        setAudioSessionTypeSafe('auto');
-        if (sharedAudioCtx && sharedAudioCtx.state === 'running') {
-          try {
-            sharedAudioCtx.suspend().catch(() => {});
-          } catch {
-            // ignore
-          }
-        }
-      }
-    }, 650);
-  } catch {
-    // Ignore audio context autoplay errors
+  if (type === 'timerDone' || type === 'boxingBell') {
+    return playBoxingRingBell();
   }
-}
-
-function getDitherChunk() {
-  if (cachedDitherChunk) return cachedDitherChunk;
-  const chunk = new Int16Array(4096);
-  for (let i = 0; i < chunk.length; i++) {
-    chunk[i] = (i & 31) === 0 ? (i & 32 ? 2 : -2) : 0;
-  }
-  cachedDitherChunk = chunk;
-  return chunk;
-}
-
-function getBellMono22kPcm() {
-  if (cachedBellMono22kPcm) return cachedBellMono22kPcm;
-
-  const commaIdx = BOXING_BELL_WAV_DATA_URI.indexOf(',');
-  const b64 =
-    commaIdx >= 0
-      ? BOXING_BELL_WAV_DATA_URI.slice(commaIdx + 1)
-      : BOXING_BELL_WAV_DATA_URI;
-  const binary = atob(b64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-
-  const view = new DataView(bytes.buffer);
-  const leadInFrames = Math.round(SILENT_LEAD_IN_SEC * BOXING_BELL_SAMPLE_RATE);
-  const pcmByteStart = 44 + leadInFrames * 4;
-  const totalStereoFrames = Math.max(
-    1,
-    Math.floor((bytes.byteLength - pcmByteStart) / 4)
-  );
-  const monoLen = Math.max(1, Math.floor(totalStereoFrames / 2));
-  const mono = new Int16Array(monoLen);
-
-  let ptr = pcmByteStart;
-  for (let i = 0; i < monoLen; i++) {
-    const l0 = view.getInt16(ptr, true);
-    const r0 = view.getInt16(ptr + 2, true);
-    const l1 = view.getInt16(ptr + 4, true);
-    const r1 = view.getInt16(ptr + 6, true);
-    mono[i] = (l0 + r0 + l1 + r1) >> 2;
-    ptr += 8;
-  }
-
-  cachedBellMono22kPcm = mono;
-  return mono;
-}
-
-function createBakedRestWavBlob(remainingMs) {
-  const bellPcm = getBellMono22kPcm();
-  const ditherChunk = getDitherChunk();
-  const safeSec = Math.max(
-    0.15,
-    Math.min(MAX_BAKED_SEC, Number(remainingMs || 0) / 1000)
-  );
-  const silenceFrames = Math.max(0, Math.round(safeSec * BAKED_SAMPLE_RATE));
-  const totalFrames = silenceFrames + bellPcm.length;
-  const dataBytes = totalFrames * 2;
-  const buffer = new ArrayBuffer(44 + dataBytes);
-  const view = new DataView(buffer);
-
-  const writeStr = (off, str) => {
-    for (let i = 0; i < str.length; i++) {
-      view.setUint8(off + i, str.charCodeAt(i));
-    }
-  };
-  writeStr(0, 'RIFF');
-  view.setUint32(4, 36 + dataBytes, true);
-  writeStr(8, 'WAVE');
-  writeStr(12, 'fmt ');
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, 1, true);
-  view.setUint32(24, BAKED_SAMPLE_RATE, true);
-  view.setUint32(28, BAKED_SAMPLE_RATE * 2, true);
-  view.setUint16(32, 2, true);
-  view.setUint16(34, 16, true);
-  writeStr(36, 'data');
-  view.setUint32(40, dataBytes, true);
-
-  if (IS_LITTLE_ENDIAN) {
-    const pcmOut = new Int16Array(buffer, 44, totalFrames);
-    let pos = 0;
-    while (pos < silenceFrames) {
-      const take = Math.min(ditherChunk.length, silenceFrames - pos);
-      pcmOut.set(
-        take === ditherChunk.length
-          ? ditherChunk
-          : ditherChunk.subarray(0, take),
-        pos
-      );
-      pos += take;
-    }
-    pcmOut.set(bellPcm, silenceFrames);
-  } else {
-    let byteOff = 44;
-    for (let i = 0; i < silenceFrames; i++) {
-      const sample = (i & 31) === 0 ? (i & 32 ? 2 : -2) : 0;
-      view.setInt16(byteOff, sample, true);
-      byteOff += 2;
-    }
-    for (let i = 0; i < bellPcm.length; i++) {
-      view.setInt16(byteOff, bellPcm[i], true);
-      byteOff += 2;
-    }
-  }
-
-  return {
-    blob: new Blob([buffer], { type: 'audio/wav' }),
-    silenceSeconds: silenceFrames / BAKED_SAMPLE_RATE,
-    totalDurationSeconds: totalFrames / BAKED_SAMPLE_RATE,
-  };
-}
-
-function clearColdRearmListener() {
-  if (coldRearmCleanup) {
-    coldRearmCleanup();
-    coldRearmCleanup = null;
-  }
-}
-
-function clearLockScreenMediaSession() {
-  if (
-    typeof navigator === 'undefined' ||
-    !('mediaSession' in navigator) ||
-    !navigator.mediaSession
-  ) {
-    return;
-  }
-  try {
-    navigator.mediaSession.playbackState = 'none';
-  } catch {
-    // ignore
-  }
-  try {
-    navigator.mediaSession.metadata = null;
-  } catch {
-    // ignore
-  }
-  try {
-    navigator.mediaSession.setActionHandler?.('nexttrack', null);
-  } catch {
-    // ignore
-  }
-  try {
-    navigator.mediaSession.setActionHandler?.('pause', null);
-  } catch {
-    // ignore
-  }
-  try {
-    navigator.mediaSession.setActionHandler?.('play', null);
-  } catch {
-    // ignore
-  }
-}
-
-function applyLockScreenMediaSession({
-  exerciseName,
-  lang,
-  remainingSec,
-  totalSec,
-  onSkip,
-}) {
-  if (
-    typeof navigator === 'undefined' ||
-    !('mediaSession' in navigator) ||
-    !navigator.mediaSession
-  ) {
-    return;
-  }
-  try {
-    if (typeof window !== 'undefined' && 'MediaMetadata' in window) {
-      navigator.mediaSession.metadata = new window.MediaMetadata({
-        title: exerciseName
-          ? `${lang === 'es' ? 'Descanso' : 'Rest'} • ${exerciseName}`
-          : lang === 'es'
-          ? 'Tiempo de Descanso'
-          : 'Rest Timer',
-        artist: 'Alfa Gym',
-        album: lang === 'es' ? 'Entrenamiento en curso' : 'Active Workout',
-        artwork: [
-          {
-            src: './apple-touch-icon.png',
-            sizes: '180x180',
-            type: 'image/png',
-          },
-        ],
-      });
-    }
-    navigator.mediaSession.playbackState = 'playing';
-    const safeDur = Math.max(1, Number(totalSec) || 60);
-    const remClamped = Math.max(
-      0,
-      Math.min(safeDur, Number(remainingSec) || 0)
-    );
-    const pos = Math.max(0, Math.min(safeDur, safeDur - remClamped));
-    try {
-      navigator.mediaSession.setPositionState?.({
-        duration: safeDur,
-        playbackRate: 1,
-        position: pos,
-      });
-    } catch {
-      // ignore Safari range errors
-    }
-    if (typeof onSkip === 'function') {
-      try {
-        navigator.mediaSession.setActionHandler('nexttrack', () => {
-          onSkip();
-        });
-      } catch {
-        // ignore
-      }
-    }
-  } catch {
-    // ignore
-  }
-}
-
-function ensureRestTimerAudioElement() {
-  if (typeof window === 'undefined' || typeof Audio === 'undefined') return null;
-  if (restTimerAudioEl) return restTimerAudioEl;
-
-  const el = new Audio();
-  el.preload = 'auto';
-  el.playsInline = true;
-  el.volume = 1.0;
-  el.muted = false;
-
-  const handleBellReached = () => {
-    const cfg = restAudioConfig;
-    if (!isRestAudioActive || !cfg || !cfg.timerId) return;
-    if (!hasTimerBellAlreadyRung(cfg.timerId)) {
-      markRestBellRung(cfg.timerId);
-      if (
-        typeof navigator !== 'undefined' &&
-        typeof navigator.vibrate === 'function'
-      ) {
-        try {
-          navigator.vibrate([100, 155, 220]);
-        } catch {
-          // ignore
-        }
-      }
-      sendRestDoneNotification({
-        exerciseName: cfg.exerciseName,
-        lang: cfg.lang,
-        silent: true,
-      });
-      try {
-        cfg.onBellRung?.(cfg.timerId);
-      } catch {
-        // ignore
-      }
-    }
-  };
-
-  el.addEventListener('timeupdate', () => {
-    const cfg = restAudioConfig;
-    if (!isRestAudioActive || !cfg) return;
-    if (
-      cfg.mode === 'music100' &&
-      typeof document !== 'undefined' &&
-      document.visibilityState === 'visible' &&
-      el.currentTime >= Math.max(0, cfg.silenceSeconds - 0.45)
-    ) {
-      setAudioSessionTypeSafe('transient');
-    }
-    if (el.currentTime >= cfg.silenceSeconds + 0.04) {
-      handleBellReached();
-    }
-  });
-
-  el.addEventListener('ended', () => {
-    handleBellReached();
-    stopBakedRestTimerAudio();
-  });
-
-  restTimerAudioEl = el;
-  return el;
+  // 'check' and 'pr' are intentionally silent so music playback is undisturbed
+  return false;
 }
 
 export function stopBakedRestTimerAudio() {
-  restAudioGenId++;
-  isRestAudioActive = false;
-  restAudioConfig = null;
   clearColdRearmListener();
-
-  if (restTimerAudioEl) {
-    try {
-      if (!restTimerAudioEl.paused) {
-        restTimerAudioEl.pause();
-      }
-      restTimerAudioEl.removeAttribute('src');
-      restTimerAudioEl.load();
-    } catch {
-      // ignore
-    }
-  }
-  if (activeRestBlobUrl) {
-    try {
-      URL.revokeObjectURL(activeRestBlobUrl);
-    } catch {
-      // ignore
-    }
-    activeRestBlobUrl = null;
-  }
-  clearLockScreenMediaSession();
-  if (!isBellCurrentlyRinging) {
-    releasePlaybackSessionToAuto();
-  }
+  cancelScheduledRestAudio();
 }
 
-export function startBakedRestTimerAudio({
-  timerId,
-  remainingMs,
-  totalSec,
-  exerciseName = '',
-  lang = 'es',
-  onBellRung,
-  onSkipFromLockScreen,
-}) {
-  const mode = getRestAudioMode();
-  clearColdRearmListener();
+export function startBakedRestTimerAudio({ timerId, remainingMs, onBellRung } = {}) {
+  stopBakedRestTimerAudio();
 
-  if (mode === 'off' || !remainingMs || remainingMs <= 100) {
-    stopBakedRestTimerAudio();
+  const mode = getRestAudioMode();
+  if (
+    !timerId ||
+    mode === 'off' ||
+    hasTimerBellAlreadyRung(timerId) ||
+    !Number.isFinite(remainingMs) ||
+    remainingMs <= 150
+  ) {
     return false;
   }
 
-  // Cancel any pending UI-sound audioSession cleanup that could clobber the rest session
-  if (uiCtxSuspendTimer) {
-    clearTimeout(uiCtxSuspendTimer);
-    uiCtxSuspendTimer = null;
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+    return false;
   }
-  if (sharedAudioCtx && sharedAudioCtx.state === 'running') {
+
+  lockAmbientAudioSession();
+
+  const ctx = getOrCreateAudioContext();
+  if (!ctx) return false;
+
+  const token = scheduleToken;
+  const expectedWallEndMs = Date.now() + remainingMs;
+
+  const scheduleOnContext = (currentRemainingMs) => {
+    if (token !== scheduleToken) return false;
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      return false;
+    }
+    if (hasTimerBellAlreadyRung(timerId) || currentRemainingMs <= 150) {
+      return false;
+    }
+
     try {
-      sharedAudioCtx.suspend().catch(() => {});
+      const buffer = getBoxingBellAudioBuffer(ctx);
+      const source = ctx.createBufferSource();
+      const masterGain = ctx.createGain();
+      source.buffer = buffer;
+
+      const delaySec = Math.max(0.05, currentRemainingMs / 1000);
+      const startCtxTime = ctx.currentTime + delaySec;
+      const bellDurationMs = Math.round(
+        (Number.isFinite(buffer?.duration) && buffer.duration > 0
+          ? buffer.duration
+          : BELL_DURATION_SEC) * 1000
+      );
+      const wallEndMs = Date.now() + Math.max(50, currentRemainingMs);
+      const expectedBellFinishWallMs = wallEndMs + bellDurationMs;
+
+      masterGain.gain.setValueAtTime(1.0, startCtxTime);
+      source.connect(masterGain);
+      masterGain.connect(ctx.destination);
+
+      activeScheduledRest = {
+        token,
+        timerId,
+        source,
+        gain: masterGain,
+        expectedWallEndMs: wallEndMs,
+        expectedBellFinishWallMs,
+      };
+
+      source.onended = () => {
+        if (token !== scheduleToken) return;
+        const current = activeScheduledRest;
+        if (!current || current.token !== token) return;
+        activeScheduledRest = null;
+        disconnectNodeSafe(source);
+        disconnectNodeSafe(masterGain);
+
+        if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+          return;
+        }
+        const now = Date.now();
+        if (
+          now < current.expectedWallEndMs - 200 ||
+          Math.abs(now - current.expectedBellFinishWallMs) > 1500
+        ) {
+          return;
+        }
+
+        markRestBellRung(timerId);
+        try {
+          if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+            navigator.vibrate([100, 155, 220]);
+          }
+        } catch {
+          // ignore vibrate errors
+        }
+        if (typeof onBellRung === 'function') {
+          try {
+            onBellRung(timerId);
+          } catch {
+            // ignore callback errors
+          }
+        }
+      };
+
+      source.start(startCtxTime);
+      return true;
     } catch {
-      // ignore
+      if (token === scheduleToken) {
+        cancelScheduledRestAudio();
+      }
+      return false;
     }
-  }
-
-  const el = ensureRestTimerAudioElement();
-  if (!el) return false;
-
-  const gen = ++restAudioGenId;
-
-  // Release any previous Blob safely before swapping src
-  try {
-    if (!el.paused) {
-      el.pause();
-    }
-    el.removeAttribute('src');
-    el.load();
-  } catch {
-    // ignore
-  }
-  if (activeRestBlobUrl) {
-    try {
-      URL.revokeObjectURL(activeRestBlobUrl);
-    } catch {
-      // ignore
-    }
-    activeRestBlobUrl = null;
-  }
-
-  const { blob, silenceSeconds, totalDurationSeconds } =
-    createBakedRestWavBlob(remainingMs);
-  const blobUrl = URL.createObjectURL(blob);
-  activeRestBlobUrl = blobUrl;
-  isRestAudioActive = true;
-  restAudioConfig = {
-    timerId,
-    mode,
-    silenceSeconds,
-    totalDurationSeconds,
-    totalSec,
-    exerciseName,
-    lang,
-    onBellRung,
-    onSkipFromLockScreen,
   };
 
-  if (mode === 'lockscreen') {
-    setAudioSessionTypeSafe('playback');
-    applyLockScreenMediaSession({
-      exerciseName,
-      lang,
-      remainingSec: remainingMs / 1000,
-      totalSec,
-      onSkip: onSkipFromLockScreen,
-    });
-  } else if (mode === 'music100') {
-    clearLockScreenMediaSession();
-    const isHidden =
-      typeof document !== 'undefined' && document.visibilityState === 'hidden';
-    setAudioSessionTypeSafe(isHidden ? 'transient' : 'ambient');
-  } else {
-    // 'background' default: MixWithOthers + DuckOthers survives iOS lock screen & never pauses Spotify
-    clearLockScreenMediaSession();
-    setAudioSessionTypeSafe('transient');
+  if (ctx.state === 'running') {
+    return scheduleOnContext(remainingMs);
   }
-
-  el.muted = false;
-  el.volume = 1.0;
-  el.src = blobUrl;
 
   try {
-    const playPromise = el.play();
-    if (playPromise && typeof playPromise.then === 'function') {
-      playPromise.catch(() => {
-        if (gen !== restAudioGenId) return;
-        isRestAudioActive = false;
-        restAudioConfig = null;
-        try {
-          el.removeAttribute('src');
-          el.load();
-        } catch {
-          // ignore
-        }
-        if (activeRestBlobUrl === blobUrl) {
-          try {
-            URL.revokeObjectURL(blobUrl);
-          } catch {
-            // ignore
+    const resumePromise = ctx.resume();
+    if (resumePromise && typeof resumePromise.then === 'function') {
+      resumePromise
+        .then(() => {
+          if (token !== scheduleToken || ctx.state !== 'running') return;
+          const actualRemainingMs = expectedWallEndMs - Date.now();
+          if (scheduleOnContext(actualRemainingMs)) {
+            clearColdRearmListener();
           }
-          activeRestBlobUrl = null;
-        }
-        clearLockScreenMediaSession();
-        if (!isBellCurrentlyRinging) {
-          releasePlaybackSessionToAuto();
-        }
-      });
+        })
+        .catch(() => {});
     }
   } catch {
-    if (gen === restAudioGenId) {
-      isRestAudioActive = false;
-      restAudioConfig = null;
-      clearLockScreenMediaSession();
-    }
-    return false;
+    // ignore resume failure outside gesture
   }
-  return true;
+  return false;
 }
 
 export function armRestAudioOnNextTap(getConfigFn) {

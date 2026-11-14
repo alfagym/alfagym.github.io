@@ -40,11 +40,22 @@ export function getExerciseItemKey(ex, fallbackIdx = 0) {
   return `idx-${fallbackIdx}`;
 }
 
+function isEditableElement(el) {
+  if (!el) return false;
+  const tag = el.tagName;
+  return (
+    tag === 'INPUT' ||
+    tag === 'TEXTAREA' ||
+    tag === 'SELECT' ||
+    Boolean(el.isContentEditable)
+  );
+}
+
 function isInteractiveSubTarget(target, currentTarget, ignoreSelector) {
   if (!target || typeof target.closest !== 'function') return false;
   if (
     target.closest(
-      'button, select, input, textarea, a, .thumb-zoom-btn, .draft-ex-swap-pill, .clickable-chip, .ex-preview-chip'
+      'button, select, input, textarea, a, .thumb-zoom-btn, .draft-ex-swap-pill, .clickable-chip, .ex-preview-chip, .ex-rest-selector, .live-ex-controls, .draft-ex-Order-actions'
     )
   ) {
     return true;
@@ -68,15 +79,89 @@ function findScrollParent(el) {
   let node = el?.parentElement || null;
   while (node && node !== document.body && node !== document.documentElement) {
     const style = window.getComputedStyle(node);
-    if (
-      /(auto|scroll|overlay)/.test(style.overflowY) &&
-      node.scrollHeight > node.clientHeight + 2
-    ) {
+    if (/(auto|scroll|overlay)/.test(style.overflowY)) {
       return node;
     }
     node = node.parentElement;
   }
   return window;
+}
+
+function getVisibleScrollBounds(scrollParent) {
+  let topBound = 62;
+  let bottomBound = window.innerHeight || 844;
+
+  if (scrollParent !== window && scrollParent instanceof Element) {
+    const sr = scrollParent.getBoundingClientRect();
+    topBound = Math.max(0, sr.top);
+    bottomBound = Math.min(window.innerHeight || 844, sr.bottom);
+
+    const stickyHeader = scrollParent.querySelector(
+      '.modal-header, .live-workout-header, .live-header'
+    );
+    if (stickyHeader) {
+      const shStyle = window.getComputedStyle(stickyHeader);
+      if (
+        shStyle.display !== 'none' &&
+        (shStyle.position === 'sticky' || shStyle.position === 'fixed')
+      ) {
+        topBound = Math.max(topBound, stickyHeader.getBoundingClientRect().bottom);
+      }
+    }
+
+    const stickyFooter = scrollParent.querySelector(
+      '.modal-sticky-footer, .modal-footer'
+    );
+    if (stickyFooter) {
+      const sfStyle = window.getComputedStyle(stickyFooter);
+      if (
+        sfStyle.display !== 'none' &&
+        (sfStyle.position === 'sticky' || sfStyle.position === 'fixed')
+      ) {
+        bottomBound = Math.min(
+          bottomBound,
+          stickyFooter.getBoundingClientRect().top
+        );
+      }
+    }
+  } else {
+    let dynamicTop = 0;
+    const headerEl = document.querySelector('.alfa-header');
+    if (headerEl && window.getComputedStyle(headerEl).display !== 'none') {
+      dynamicTop = Math.max(dynamicTop, headerEl.getBoundingClientRect().bottom);
+    }
+    const miniBannerEl = document.querySelector('.active-workout-mini-banner');
+    if (
+      miniBannerEl &&
+      window.getComputedStyle(miniBannerEl).display !== 'none'
+    ) {
+      dynamicTop = Math.max(
+        dynamicTop,
+        miniBannerEl.getBoundingClientRect().bottom
+      );
+    }
+    if (dynamicTop > 0) {
+      topBound = dynamicTop;
+    }
+  }
+
+  const mobNav = document.querySelector('.alfa-mobile-bottom-nav');
+  if (mobNav && window.getComputedStyle(mobNav).display !== 'none') {
+    if (
+      scrollParent === window ||
+      !(scrollParent instanceof Element) ||
+      !scrollParent.closest('.modal-backdrop, .modal-overlay')
+    ) {
+      bottomBound = Math.min(bottomBound, mobNav.getBoundingClientRect().top);
+    }
+  }
+
+  const restBar = document.querySelector('.floating-rest-timer-bar');
+  if (restBar && window.getComputedStyle(restBar).display !== 'none') {
+    bottomBound = Math.min(bottomBound, restBar.getBoundingClientRect().top);
+  }
+
+  return { topBound, bottomBound };
 }
 
 function computeFollowerCoords(el, clientX, clientY, pointerType) {
@@ -89,7 +174,7 @@ function computeFollowerCoords(el, clientX, clientY, pointerType) {
   const rawX = clientX - width * 0.5;
   const clampedX = Math.max(12, Math.min(vw - width - 12, rawX));
 
-  const verticalOffset = pointerType === 'touch' ? 54 : 26;
+  const verticalOffset = pointerType === 'touch' ? 58 : 26;
   const rawY = clientY - verticalOffset;
   const clampedY = Math.max(10, Math.min(vh - height - 10, rawY));
 
@@ -105,6 +190,7 @@ export function useLongPressReorder({
   getItemLabel,
   getItemThumb,
   ignoreSelector = null,
+  compactOnDrag = false,
 }) {
   const containerRef = useRef(null);
   const followerRef = useRef(null);
@@ -115,6 +201,7 @@ export function useLongPressReorder({
     getItemLabel,
     getItemThumb,
     ignoreSelector,
+    compactOnDrag,
   });
   latestRef.current = {
     items,
@@ -123,12 +210,22 @@ export function useLongPressReorder({
     getItemLabel,
     getItemThumb,
     ignoreSelector,
+    compactOnDrag,
   };
 
   const sessionRef = useRef(null);
+  const pendingRestoreRef = useRef(null);
   const justDraggedRef = useRef(false);
   const clearJustDraggedTimerRef = useRef(null);
   const [dragState, setDragState] = useState(null);
+
+  const clearContainerDragPadding = useCallback(() => {
+    const container = containerRef.current;
+    if (container) {
+      container.style.paddingTop = '';
+      container.style.paddingBottom = '';
+    }
+  }, []);
 
   const positionFollower = useCallback((clientX, clientY, pointerType) => {
     const el = followerRef.current;
@@ -140,7 +237,15 @@ export function useLongPressReorder({
   const evaluateLiveSwap = useCallback((pointerX, pointerY) => {
     const s = sessionRef.current;
     const container = containerRef.current;
-    if (!s || s.phase !== 'dragging' || !container) return;
+    if (
+      !s ||
+      s.phase !== 'dragging' ||
+      !s.isAnchored ||
+      !s.hasMovedAfterActivate ||
+      !container
+    ) {
+      return;
+    }
 
     const nodes = Array.from(container.children).filter(
       (n) => n.getAttribute('data-reorder-item') === 'true'
@@ -262,6 +367,7 @@ export function useLongPressReorder({
 
   const cleanupSession = useCallback(() => {
     const s = sessionRef.current;
+    const wasDragging = s?.phase === 'dragging';
     if (s) {
       if (s.holdTimer) {
         window.clearTimeout(s.holdTimer);
@@ -282,12 +388,23 @@ export function useLongPressReorder({
       }
       sessionRef.current = null;
     }
+    if (!wasDragging) {
+      clearContainerDragPadding();
+    }
     document.body.classList.remove('alfa-dragging-active');
     setDragState(null);
-  }, []);
+  }, [clearContainerDragPadding]);
 
   const finishSession = useCallback(() => {
-    const wasDragging = sessionRef.current?.phase === 'dragging';
+    const s = sessionRef.current;
+    const wasDragging = s?.phase === 'dragging';
+    if (wasDragging && latestRef.current.compactOnDrag) {
+      pendingRestoreRef.current = {
+        idx: s.currentIdx,
+        targetY: s.lastY,
+        scrollParent: s.scrollParent,
+      };
+    }
     cleanupSession();
     if (wasDragging) {
       if (clearJustDraggedTimerRef.current) {
@@ -310,48 +427,13 @@ export function useLongPressReorder({
       const dtFactor = Math.min(2.2, Math.max(0.4, (now - lastFrameTime) / 16.67));
       lastFrameTime = now;
 
+      if (!s.isAnchored || !s.hasMovedAfterActivate) {
+        s.rafId = window.requestAnimationFrame(tick);
+        return;
+      }
+
       const scrollParent = s.scrollParent || window;
-      let topBound = 62;
-      let bottomBound = window.innerHeight || 844;
-
-      if (scrollParent !== window && scrollParent instanceof Element) {
-        const sr = scrollParent.getBoundingClientRect();
-        topBound = Math.max(0, sr.top);
-        bottomBound = Math.min(window.innerHeight || 844, sr.bottom);
-      } else {
-        let dynamicTop = 0;
-        const headerEl = document.querySelector('.alfa-header');
-        if (headerEl && window.getComputedStyle(headerEl).display !== 'none') {
-          dynamicTop = Math.max(
-            dynamicTop,
-            headerEl.getBoundingClientRect().bottom
-          );
-        }
-        const miniBannerEl = document.querySelector(
-          '.active-workout-mini-banner'
-        );
-        if (
-          miniBannerEl &&
-          window.getComputedStyle(miniBannerEl).display !== 'none'
-        ) {
-          dynamicTop = Math.max(
-            dynamicTop,
-            miniBannerEl.getBoundingClientRect().bottom
-          );
-        }
-        if (dynamicTop > 0) {
-          topBound = dynamicTop;
-        }
-      }
-
-      const mobNav = document.querySelector('.alfa-mobile-bottom-nav');
-      if (mobNav && window.getComputedStyle(mobNav).display !== 'none') {
-        bottomBound = Math.min(bottomBound, mobNav.getBoundingClientRect().top);
-      }
-      const restBar = document.querySelector('.floating-rest-timer-bar');
-      if (restBar && window.getComputedStyle(restBar).display !== 'none') {
-        bottomBound = Math.min(bottomBound, restBar.getBoundingClientRect().top);
-      }
+      const { topBound, bottomBound } = getVisibleScrollBounds(scrollParent);
 
       const EDGE_ZONE = 74;
       let step = 0;
@@ -402,15 +484,25 @@ export function useLongPressReorder({
     const s = sessionRef.current;
     if (!s || s.phase !== 'pressing') return;
 
+    const isCompact = Boolean(latestRef.current.compactOnDrag);
     s.phase = 'dragging';
     s.holdTimer = null;
+    s.activateX = s.lastX;
+    s.activateY = s.lastY;
+    s.hasMovedAfterActivate = false;
+    s.isAnchored = !isCompact;
     s.scrollParent = findScrollParent(containerRef.current);
+    s.pendingAnchor = isCompact
+      ? { idx: s.currentIdx, targetY: s.lastY }
+      : null;
 
     justDraggedRef.current = true;
-    try {
-      window.getSelection?.()?.removeAllRanges?.();
-    } catch {
-      // ignore
+    if (!isEditableElement(document.activeElement)) {
+      try {
+        window.getSelection?.()?.removeAllRanges?.();
+      } catch {
+        // ignore
+      }
     }
     if (
       document.activeElement &&
@@ -441,19 +533,106 @@ export function useLongPressReorder({
       thumbUrl,
       initialX: s.lastX,
       initialY: s.lastY,
+      compactOnDrag: isCompact,
     });
 
     startAutoScroll();
   }, [startAutoScroll]);
 
+  const isDraggingActive = Boolean(dragState);
+
+  useLayoutEffect(() => {
+    if (isDraggingActive) {
+      const s = sessionRef.current;
+      const container = containerRef.current;
+      if (!s || !s.pendingAnchor || !container) {
+        if (s) s.isAnchored = true;
+        return;
+      }
+
+      const { idx, targetY } = s.pendingAnchor;
+      const sp = s.scrollParent || findScrollParent(container);
+      s.scrollParent = sp;
+
+      container.style.paddingBottom = '55vh';
+      container.style.paddingTop = '0px';
+
+      const nodes = Array.from(container.children).filter(
+        (n) => n.getAttribute('data-reorder-item') === 'true'
+      );
+      const activeNode = nodes[idx];
+
+      if (activeNode) {
+        const newRect = activeNode.getBoundingClientRect();
+        const newCenterY = newRect.top + newRect.height * 0.5;
+        const rawDelta = newCenterY - targetY;
+
+        if (Math.abs(rawDelta) > 1) {
+          if (sp === window) {
+            window.scrollTo(0, Math.max(0, window.scrollY + rawDelta));
+          } else if (sp instanceof Element) {
+            sp.scrollTop = Math.max(0, sp.scrollTop + rawDelta);
+          }
+        }
+
+        const afterRect = activeNode.getBoundingClientRect();
+        const afterCenterY = afterRect.top + afterRect.height * 0.5;
+        const deficitTop = targetY - afterCenterY;
+        if (deficitTop > 2) {
+          container.style.paddingTop = `${Math.round(deficitTop)}px`;
+        }
+      }
+
+      s.pendingAnchor = null;
+      s.isAnchored = true;
+      positionFollower(s.lastX, s.lastY, s.pointerType);
+      return;
+    }
+
+    clearContainerDragPadding();
+    const restore = pendingRestoreRef.current;
+    if (!restore) return;
+    pendingRestoreRef.current = null;
+
+    const container = containerRef.current;
+    if (!container) return;
+
+    const nodes = Array.from(container.children).filter(
+      (n) => n.getAttribute('data-reorder-item') === 'true'
+    );
+    const targetNode = nodes[restore.idx];
+    if (!targetNode) return;
+
+    const sp = restore.scrollParent || findScrollParent(container);
+    const { topBound, bottomBound } = getVisibleScrollBounds(sp);
+    const minHeaderY = topBound + 32;
+    const maxHeaderY = Math.max(minHeaderY, bottomBound - 80);
+    const clampedTargetY = Math.max(
+      minHeaderY,
+      Math.min(maxHeaderY, restore.targetY)
+    );
+
+    const expandedRect = targetNode.getBoundingClientRect();
+    const deltaY = expandedRect.top + 28 - clampedTargetY;
+    if (Math.abs(deltaY) > 2) {
+      if (sp === window) {
+        window.scrollTo(0, Math.max(0, window.scrollY + deltaY));
+      } else if (sp instanceof Element) {
+        sp.scrollTop = Math.max(0, sp.scrollTop + deltaY);
+      }
+    }
+  }, [isDraggingActive, clearContainerDragPadding, positionFollower]);
+
   useEffect(() => {
     return () => {
+      pendingRestoreRef.current = null;
       cleanupSession();
+      clearContainerDragPadding();
       if (clearJustDraggedTimerRef.current) {
         window.clearTimeout(clearJustDraggedTimerRef.current);
       }
     };
-  }, [cleanupSession]);
+  }, [cleanupSession, clearContainerDragPadding]);
 
   const getHandleProps = useCallback(
     (index) => ({
@@ -473,6 +652,14 @@ export function useLongPressReorder({
 
         cleanupSession();
 
+        if (!isEditableElement(document.activeElement)) {
+          try {
+            window.getSelection?.()?.removeAllRanges?.();
+          } catch {
+            // ignore
+          }
+        }
+
         const touch = e.touches[0];
         const session = {
           phase: 'pressing',
@@ -482,6 +669,11 @@ export function useLongPressReorder({
           startY: touch.clientY,
           lastX: touch.clientX,
           lastY: touch.clientY,
+          activateX: touch.clientX,
+          activateY: touch.clientY,
+          hasMovedAfterActivate: false,
+          isAnchored: true,
+          pendingAnchor: null,
           currentIdx: index,
           lastSwap: null,
           holdTimer: null,
@@ -490,6 +682,12 @@ export function useLongPressReorder({
           cleanupFns: [],
         };
         sessionRef.current = session;
+
+        const onSelectStart = (ev) => {
+          if (ev.cancelable) {
+            ev.preventDefault();
+          }
+        };
 
         const onWindowTouchMove = (ev) => {
           const s = sessionRef.current;
@@ -516,6 +714,15 @@ export function useLongPressReorder({
             if (ev.cancelable) ev.preventDefault();
             s.lastX = matchedTouch.clientX;
             s.lastY = matchedTouch.clientY;
+            if (
+              !s.hasMovedAfterActivate &&
+              Math.hypot(
+                matchedTouch.clientX - s.activateX,
+                matchedTouch.clientY - s.activateY
+              ) >= 6
+            ) {
+              s.hasMovedAfterActivate = true;
+            }
             positionFollower(matchedTouch.clientX, matchedTouch.clientY, 'touch');
             evaluateLiveSwap(matchedTouch.clientX, matchedTouch.clientY);
           }
@@ -553,6 +760,9 @@ export function useLongPressReorder({
           }
         };
 
+        document.addEventListener('selectstart', onSelectStart, {
+          capture: true,
+        });
         window.addEventListener('touchmove', onWindowTouchMove, {
           passive: false,
         });
@@ -566,6 +776,10 @@ export function useLongPressReorder({
         document.addEventListener('visibilitychange', onVisibility);
 
         session.cleanupFns.push(
+          () =>
+            document.removeEventListener('selectstart', onSelectStart, {
+              capture: true,
+            }),
           () =>
             window.removeEventListener('touchmove', onWindowTouchMove, {
               passive: false,
@@ -598,6 +812,14 @@ export function useLongPressReorder({
 
         cleanupSession();
 
+        if (!isEditableElement(document.activeElement)) {
+          try {
+            window.getSelection?.()?.removeAllRanges?.();
+          } catch {
+            // ignore
+          }
+        }
+
         const isInstantGrip = Boolean(
           e.target?.closest?.('[data-instant-grip="true"]')
         );
@@ -611,6 +833,11 @@ export function useLongPressReorder({
           startY: e.clientY,
           lastX: e.clientX,
           lastY: e.clientY,
+          activateX: e.clientX,
+          activateY: e.clientY,
+          hasMovedAfterActivate: false,
+          isAnchored: true,
+          pendingAnchor: null,
           currentIdx: index,
           lastSwap: null,
           holdTimer: null,
@@ -619,6 +846,12 @@ export function useLongPressReorder({
           cleanupFns: [],
         };
         sessionRef.current = session;
+
+        const onSelectStart = (ev) => {
+          if (ev.cancelable) {
+            ev.preventDefault();
+          }
+        };
 
         const onWindowMouseMove = (ev) => {
           const s = sessionRef.current;
@@ -637,6 +870,15 @@ export function useLongPressReorder({
             ev.preventDefault();
             s.lastX = ev.clientX;
             s.lastY = ev.clientY;
+            if (
+              !s.hasMovedAfterActivate &&
+              Math.hypot(
+                ev.clientX - s.activateX,
+                ev.clientY - s.activateY
+              ) >= 6
+            ) {
+              s.hasMovedAfterActivate = true;
+            }
             positionFollower(ev.clientX, ev.clientY, 'mouse');
             evaluateLiveSwap(ev.clientX, ev.clientY);
           }
@@ -650,11 +892,18 @@ export function useLongPressReorder({
           finishSession();
         };
 
+        document.addEventListener('selectstart', onSelectStart, {
+          capture: true,
+        });
         window.addEventListener('mousemove', onWindowMouseMove);
         window.addEventListener('mouseup', onWindowMouseUp);
         window.addEventListener('blur', onInterrupt);
 
         session.cleanupFns.push(
+          () =>
+            document.removeEventListener('selectstart', onSelectStart, {
+              capture: true,
+            }),
           () => window.removeEventListener('mousemove', onWindowMouseMove),
           () => window.removeEventListener('mouseup', onWindowMouseUp),
           () => window.removeEventListener('blur', onInterrupt)

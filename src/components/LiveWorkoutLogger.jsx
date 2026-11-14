@@ -35,7 +35,6 @@ import {
   getPreviousExerciseSets,
   getExerciseStats,
   calculatePlateBreakdown,
-  playGymSound,
   unlockGymAudio,
   computeWorkoutElapsedSeconds,
   toLocalCalendarDaySerial,
@@ -176,10 +175,19 @@ export default function LiveWorkoutLogger({
     items: activeWorkout?.exercises || [],
     onReorder: handleReorderActiveExercises,
     onDragStart: () => setPlatePopover(null),
+    compactOnDrag: true,
     getItemLabel: (exItem) => getExName(exerciseMap[exItem?.exerciseId]),
     getItemThumb: (exItem) =>
       exerciseMap[exItem?.exerciseId]?.thumbnailUrl || null,
   });
+
+  const isCompactReorder = Boolean(liveReorder.dragState);
+
+  useEffect(() => {
+    if (isCompactReorder && platePopover) {
+      setPlatePopover(null);
+    }
+  }, [isCompactReorder, platePopover]);
 
   const hubRoutinesReorder = useLongPressReorder({
     items: routines,
@@ -313,12 +321,6 @@ export default function LiveWorkoutLogger({
         wLbs > 0 &&
         reps > 0 &&
         (wLbs > histStats.maxWeight || est1RM > histStats.best1RM);
-
-      if (isNewPR) {
-        playGymSound('pr');
-      } else {
-        playGymSound('check');
-      }
 
       if (currentEx.restSeconds && currentEx.restSeconds > 0) {
         startRestTimer(
@@ -576,7 +578,6 @@ export default function LiveWorkoutLogger({
       // ignore confetti errors
     }
 
-    playGymSound('pr');
     setCompletedSummary({ record: finishedRecord, prList });
     onFinishWorkout(finishedRecord);
   };
@@ -1118,7 +1119,12 @@ export default function LiveWorkoutLogger({
 
       {/* Dedicated Scroll Container ONLY for Exercise Cards */}
       <div className="live-exercises-scroll-area">
-        <div ref={liveReorder.containerRef} className="live-exercises-stack">
+        <div
+          ref={liveReorder.containerRef}
+          className={`live-exercises-stack ${
+            isCompactReorder ? 'is-compact-reorder-list' : ''
+          }`}
+        >
         {(activeWorkout.exercises || []).length === 0 ? (
           <div className="empty-workout-placeholder">
             <Dumbbell size={40} className="text-muted" />
@@ -1150,10 +1156,22 @@ export default function LiveWorkoutLogger({
                 data-reorder-item="true"
                 className={`live-exercise-card ${
                   exItem.supersetGroup ? `superset-${exItem.supersetGroup}` : ''
-                } ${liveReorder.dragState?.activeIdx === exIdx ? 'is-dragging-card' : ''}`}
+                } ${isCompactReorder ? 'is-compact-reorder' : ''} ${
+                  liveReorder.dragState?.activeIdx === exIdx
+                    ? 'is-dragging-card'
+                    : ''
+                }`}
               >
                 {/* Exercise Card Header */}
-                <div className="live-ex-card-header">
+                <div
+                  className="live-ex-card-header ex-drag-handle"
+                  title={
+                    lang === 'es'
+                      ? 'Mantén presionado el nombre y arrastra para cambiar el orden'
+                      : 'Hold exercise name and drag to reorder'
+                  }
+                  {...liveReorder.getHandleProps(exIdx)}
+                >
                   <div className="live-ex-title-with-thumb">
                     <button
                       type="button"
@@ -1183,15 +1201,7 @@ export default function LiveWorkoutLogger({
                         </span>
                       )}
                     </button>
-                    <div
-                      className="live-ex-title-group ex-drag-handle"
-                      title={
-                        lang === 'es'
-                          ? 'Mantén presionado el nombre y arrastra para cambiar el orden'
-                          : 'Hold exercise name and drag to reorder'
-                      }
-                      {...liveReorder.getHandleProps(exIdx)}
-                    >
+                    <div className="live-ex-title-group">
                       {exItem.supersetGroup && (
                         <span
                           className={`superset-badge group-${exItem.supersetGroup}`}
@@ -1202,6 +1212,9 @@ export default function LiveWorkoutLogger({
                       <div className="live-ex-heading-row">
                         <span className="ex-grip-cue" data-instant-grip="true">
                           <GripVertical size={16} />
+                        </span>
+                        <span className="compact-drag-idx-badge">
+                          #{exIdx + 1}
                         </span>
                         <h3>{getExName(exObj)}</h3>
                       </div>
@@ -1289,6 +1302,11 @@ export default function LiveWorkoutLogger({
                       <Trash2 size={15} />
                     </button>
                   </div>
+
+                  <span className="compact-drag-sets-pill">
+                    {(exItem.sets || []).length}{' '}
+                    {lang === 'es' ? 'series' : 'sets'}
+                  </span>
                 </div>
 
                 {/* Inline Plate Calculator Popover */}
@@ -1608,21 +1626,15 @@ export default function LiveWorkoutLogger({
                   }}
                   title={
                     lang === 'es'
-                      ? 'Cambiar modo de alarma y música (Fondo / 100% Música / Bloqueo / Off)'
-                      : 'Switch bell & music mode (Mix / 100% Music / Lock / Off)'
+                      ? 'Activar/silenciar alarma de descanso (no detiene tu música)'
+                      : "Toggle rest alarm (won't stop your music)"
                   }
                 >
                   {!bellEnabled || restAudioMode === 'off'
                     ? '🔕 Off'
-                    : restAudioMode === 'music100'
-                    ? '🎵 100%'
-                    : restAudioMode === 'lockscreen'
-                    ? lang === 'es'
-                      ? '🔒 Bloqueo'
-                      : '🔒 Lock'
                     : lang === 'es'
-                    ? '🔔 Fondo'
-                    : '🔔 Mix'}
+                    ? '🔔 Alarma'
+                    : '🔔 Bell'}
                 </button>
               )}
               {onEnableNotifications &&

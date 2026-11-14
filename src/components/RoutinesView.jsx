@@ -166,10 +166,13 @@ export default function RoutinesView({
   const draftReorder = useLongPressReorder({
     items: editingRoutine?.exercises || [],
     onReorder: handleReorderDraftExercises,
+    compactOnDrag: true,
     getItemLabel: (exItem) => getExName(exerciseMap[exItem?.exerciseId]),
     getItemThumb: (exItem) =>
       exerciseMap[exItem?.exerciseId]?.thumbnailUrl || null,
   });
+
+  const isCompactDraftReorder = Boolean(draftReorder.dragState);
 
   const handleReorderCardExercises = (routineId, fromIdx, toIdx) => {
     setRoutines((prev) =>
@@ -882,7 +885,9 @@ export default function RoutinesView({
               {/* Exercises inside Routine */}
               <div
                 ref={draftReorder.containerRef}
-                className="routine-editor-ex-list"
+                className={`routine-editor-ex-list ${
+                  isCompactDraftReorder ? 'is-compact-reorder-list' : ''
+                }`}
               >
                 {(editingRoutine.exercises || []).map((exItem, exIdx) => {
                   const exObj = exerciseMap[exItem.exerciseId];
@@ -891,13 +896,23 @@ export default function RoutinesView({
                       key={getExerciseItemKey(exItem, exIdx)}
                       data-reorder-item="true"
                       className={`routine-draft-ex-box ${
+                        isCompactDraftReorder ? 'is-compact-reorder' : ''
+                      } ${
                         draftReorder.dragState?.activeIdx === exIdx
                           ? 'is-dragging-card'
                           : ''
                       }`}
                     >
                       {/* Exercise Top Row: Thumbnail, Draggable Exercise Name, Swap Selector, Order Up/Down, Delete */}
-                      <div className="draft-ex-header">
+                      <div
+                        className="draft-ex-header ex-drag-handle"
+                        title={
+                          lang === 'es'
+                            ? 'Mantén presionado el nombre y arrastra para cambiar el orden'
+                            : 'Hold exercise name and drag to reorder'
+                        }
+                        {...draftReorder.getHandleProps(exIdx)}
+                      >
                         <div className="draft-ex-title-wrap">
                           {exObj && (
                             <button
@@ -930,15 +945,7 @@ export default function RoutinesView({
                               )}
                             </button>
                           )}
-                          <div
-                            className="draft-ex-name-handle ex-drag-handle"
-                            title={
-                              lang === 'es'
-                                ? 'Mantén presionado el nombre y arrastra para cambiar el orden'
-                                : 'Hold exercise name and drag to reorder'
-                            }
-                            {...draftReorder.getHandleProps(exIdx)}
-                          >
+                          <div className="draft-ex-name-handle">
                             <span
                               className="ex-grip-cue"
                               data-instant-grip="true"
@@ -1024,6 +1031,11 @@ export default function RoutinesView({
                             <Trash2 size={14} />
                           </button>
                         </div>
+
+                        <span className="compact-drag-sets-pill">
+                          {(exItem.sets || []).length}{' '}
+                          {lang === 'es' ? 'series' : 'sets'}
+                        </span>
                       </div>
 
                       {/* Exercise Note & Rest Seconds Row */}

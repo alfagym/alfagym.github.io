@@ -39,7 +39,7 @@ import AccountModal from './components/AccountModal';
 import './App.css';
 
 /* global __BUILD_TIMESTAMP__ */
-const FALLBACK_TIMESTAMP = '9:26 PM - 11/12/2026';
+const FALLBACK_TIMESTAMP = '11:42 PM - 11/13/2026';
 const BUILD_TIMESTAMP =
   typeof __BUILD_TIMESTAMP__ !== 'undefined'
     ? __BUILD_TIMESTAMP__
@@ -108,24 +108,15 @@ function loadUserRoutines(userKey) {
     const hevyDefaults = DEFAULT_ROUTINES.filter((dr) =>
       dr.id.startsWith('routine-hevy-')
     );
-    const savedById = {};
-    for (const r of cleanedList) {
-      savedById[r.id] = r;
-    }
-    // Keep all 6 Hevy routines in 1-6 order at the top (using the user's edited version if already saved, unless deleted)
-    const topHevy = [];
+    const savedIds = new Set(cleanedList.map((r) => r.id));
+    const missingHevy = [];
     for (const hd of hevyDefaults) {
-      if (deletedIds.includes(hd.id)) continue;
-      if (savedById[hd.id]) {
-        topHevy.push(savedById[hd.id]);
-      } else {
-        topHevy.push(JSON.parse(JSON.stringify(hd)));
+      if (Array.isArray(deletedIds) && deletedIds.includes(hd.id)) continue;
+      if (!savedIds.has(hd.id)) {
+        missingHevy.push(JSON.parse(JSON.stringify(hd)));
       }
     }
-    const others = cleanedList.filter(
-      (r) => !r.id.startsWith('routine-hevy-')
-    );
-    return [...topHevy, ...others].map((rt) => ({
+    return [...cleanedList, ...missingHevy].map((rt) => ({
       ...rt,
       exercises: ensureExercisesUids(rt.exercises),
     }));
@@ -911,13 +902,60 @@ export default function App() {
     }
   };
 
+  const handleReorderRoutines = (fromIdx, toIdx) => {
+    setRoutines((prev) => {
+      if (
+        fromIdx < 0 ||
+        fromIdx >= prev.length ||
+        toIdx < 0 ||
+        toIdx >= prev.length ||
+        fromIdx === toIdx
+      ) {
+        return prev;
+      }
+      const next = [...prev];
+      const [moved] = next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, moved);
+      return next;
+    });
+  };
+
+  const handleDeleteRoutineById = (routineId) => {
+    if (String(routineId || '').startsWith('routine-hevy-') && activeUserKey) {
+      try {
+        const key = `alfa_gym_deleted_routines_${activeUserKey}`;
+        const raw = localStorage.getItem(key);
+        const parsed = raw ? JSON.parse(raw) : [];
+        const deletedList = Array.isArray(parsed) ? parsed : [];
+        if (!deletedList.includes(routineId)) {
+          localStorage.setItem(key, JSON.stringify([...deletedList, routineId]));
+        }
+      } catch {
+        // Ignore storage errors
+      }
+    }
+    setRoutines((prev) => prev.filter((r) => r.id !== routineId));
+  };
+
   const handleResetDefaultRoutines = () => {
     const confirmMsg =
       lang === 'es'
         ? '¿Deseas restaurar las plantillas base en tu cuenta? (Tus rutinas actuales volverán a los valores predeterminados).'
         : 'Restore default routine templates for your account?';
     if (window.confirm(confirmMsg)) {
-      setRoutines(JSON.parse(JSON.stringify(DEFAULT_ROUTINES)));
+      if (activeUserKey) {
+        try {
+          localStorage.removeItem(`alfa_gym_deleted_routines_${activeUserKey}`);
+        } catch {
+          // Ignore storage errors
+        }
+      }
+      setRoutines(
+        JSON.parse(JSON.stringify(DEFAULT_ROUTINES)).map((rt) => ({
+          ...rt,
+          exercises: ensureExercisesUids(rt.exercises),
+        }))
+      );
     }
   };
 
@@ -1194,6 +1232,7 @@ export default function App() {
             exercisesLibrary={fullExercisesLibrary}
             onAddCustomExercise={handleAddCustomExercise}
             routines={routines}
+            onReorderRoutines={handleReorderRoutines}
             workouts={workouts}
             onStartEmptyWorkout={handleStartEmptyWorkout}
             onStartRoutineWorkout={handleStartRoutineWorkout}
@@ -1217,6 +1256,7 @@ export default function App() {
             onStartRoutineWorkout={handleStartRoutineWorkout}
             initialEditingRoutineId={editingRoutineIdTarget}
             onClearInitialEditingRoutine={() => setEditingRoutineIdTarget(null)}
+            onDeleteRoutine={handleDeleteRoutineById}
             onResetDefaultRoutines={handleResetDefaultRoutines}
           />
         )}

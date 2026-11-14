@@ -71,6 +71,7 @@ export default function RoutinesView({
   onStartRoutineWorkout,
   initialEditingRoutineId,
   onClearInitialEditingRoutine,
+  onDeleteRoutine,
   onResetDefaultRoutines,
 }) {
   const [selectedFolder, setSelectedFolder] = useState('all');
@@ -178,6 +179,45 @@ export default function RoutinesView({
     return routines.filter((r) => r.folder === selectedFolder);
   }, [routines, selectedFolder]);
 
+  const handleReorderVisibleRoutines = (fromVisIdx, toVisIdx) => {
+    setRoutines((prev) => {
+      const slotIndices = [];
+      for (let i = 0; i < prev.length; i++) {
+        if (selectedFolder === 'all' || prev[i].folder === selectedFolder) {
+          slotIndices.push(i);
+        }
+      }
+      if (
+        fromVisIdx < 0 ||
+        toVisIdx < 0 ||
+        fromVisIdx >= slotIndices.length ||
+        toVisIdx >= slotIndices.length ||
+        fromVisIdx === toVisIdx
+      ) {
+        return prev;
+      }
+      const visibleItems = slotIndices.map((idx) => prev[idx]);
+      const [moved] = visibleItems.splice(fromVisIdx, 1);
+      visibleItems.splice(toVisIdx, 0, moved);
+      const next = [...prev];
+      slotIndices.forEach((slotIdx, i) => {
+        next[slotIdx] = visibleItems[i];
+      });
+      return next;
+    });
+  };
+
+  const routinesGridReorder = useLongPressReorder({
+    items: filteredRoutines,
+    onReorder: handleReorderVisibleRoutines,
+    ignoreSelector: '.routine-ex-breakdown',
+    getItemLabel: (rt) => rt?.name || (lang === 'es' ? 'Rutina' : 'Routine'),
+    getItemThumb: (rt) => {
+      const firstEx = rt?.exercises?.[0];
+      return firstEx ? exerciseMap[firstEx.exerciseId]?.thumbnailUrl || null : null;
+    },
+  });
+
   const handleOpenNewRoutine = () => {
     const firstExId = exercisesLibrary[0]?.id || 'bench-press-barbell';
     setEditingRoutine({
@@ -217,21 +257,18 @@ export default function RoutinesView({
         ? `¿Eliminar la rutina "${rt.name}" de tu perfil?`
         : `Delete routine "${rt.name}" from your profile?`;
     if (window.confirm(msg)) {
-      setRoutines((prev) => prev.filter((r) => r.id !== rt.id));
+      if (onDeleteRoutine) {
+        onDeleteRoutine(rt.id);
+      } else {
+        setRoutines((prev) => prev.filter((r) => r.id !== rt.id));
+      }
     }
   };
 
   const handleMoveRoutineCard = (rtId, direction) => {
-    setRoutines((prev) => {
-      const idx = prev.findIndex((r) => r.id === rtId);
-      if (idx === -1) return prev;
-      const targetIdx = idx + direction;
-      if (targetIdx < 0 || targetIdx >= prev.length) return prev;
-      const next = [...prev];
-      const [item] = next.splice(idx, 1);
-      next.splice(targetIdx, 0, item);
-      return next;
-    });
+    const visIdx = filteredRoutines.findIndex((r) => r.id === rtId);
+    if (visIdx === -1) return;
+    handleReorderVisibleRoutines(visIdx, visIdx + direction);
   };
 
   const handleSaveRoutine = (e) => {
@@ -470,21 +507,41 @@ export default function RoutinesView({
       </div>
 
       {/* Routines Grid */}
-      <div className="routines-cards-grid">
+      <div className="routines-cards-grid" ref={routinesGridReorder.containerRef}>
         {filteredRoutines.map((rt, rtIdx) => {
           const totalSets = (rt.exercises || []).reduce(
             (acc, e) => acc + (e.sets?.length || 0),
             0
           );
+          const isDraggingCard =
+            routinesGridReorder.dragState?.activeIdx === rtIdx;
           return (
-            <div key={rt.id} className="routine-full-card">
+            <div
+              key={rt.id}
+              data-reorder-item="true"
+              className={`routine-full-card ${
+                filteredRoutines.length > 1 ? 'ex-drag-handle' : ''
+              } ${isDraggingCard ? 'is-dragging-card' : ''}`}
+              {...(filteredRoutines.length > 1
+                ? routinesGridReorder.getHandleProps(rtIdx)
+                : {})}
+            >
               <div className="routine-card-header">
                 <div>
                   <span className="folder-tag">
                     {folders.find((f) => f.id === rt.folder)?.label ||
                       t.routines.folderCustom}
                   </span>
-                  <h3>{rt.name}</h3>
+                  <div className="routine-card-title-row">
+                    {filteredRoutines.length > 1 && (
+                      <GripVertical
+                        size={16}
+                        className="ex-grip-cue"
+                        data-instant-grip="true"
+                      />
+                    )}
+                    <h3>{rt.name}</h3>
+                  </div>
                 </div>
                 <div className="routine-icon-actions">
                   <button
@@ -1186,6 +1243,12 @@ export default function RoutinesView({
       <DragFollowerPortal
         dragState={draftReorder.dragState}
         followerRef={draftReorder.followerRef}
+        lang={lang}
+      />
+
+      <DragFollowerPortal
+        dragState={routinesGridReorder.dragState}
+        followerRef={routinesGridReorder.followerRef}
         lang={lang}
       />
     </div>

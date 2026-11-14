@@ -68,6 +68,7 @@ export default function LiveWorkoutLogger({
   exercisesLibrary,
   onAddCustomExercise,
   routines,
+  onReorderRoutines,
   workouts,
   onStartEmptyWorkout,
   onStartRoutineWorkout,
@@ -130,6 +131,16 @@ export default function LiveWorkoutLogger({
     getItemLabel: (exItem) => getExName(exerciseMap[exItem?.exerciseId]),
     getItemThumb: (exItem) =>
       exerciseMap[exItem?.exerciseId]?.thumbnailUrl || null,
+  });
+
+  const hubRoutinesReorder = useLongPressReorder({
+    items: routines,
+    onReorder: onReorderRoutines,
+    getItemLabel: (rt) => rt?.name || (lang === 'es' ? 'Rutina' : 'Routine'),
+    getItemThumb: (rt) => {
+      const firstEx = rt?.exercises?.[0];
+      return firstEx ? exerciseMap[firstEx.exerciseId]?.thumbnailUrl || null : null;
+    },
   });
 
   // Compute live workout stats
@@ -592,16 +603,36 @@ export default function LiveWorkoutLogger({
             </button>
           </div>
 
-          <div className="hub-routines-grid">
-            {routines.map((rt) => {
+          <div className="hub-routines-grid" ref={hubRoutinesReorder.containerRef}>
+            {routines.map((rt, rtIdx) => {
               const totalSets = (rt.exercises || []).reduce(
                 (acc, e) => acc + (e.sets?.length || 0),
                 0
               );
+              const isDraggingCard =
+                hubRoutinesReorder.dragState?.activeIdx === rtIdx;
               return (
-                <div key={rt.id} className="hub-routine-card">
+                <div
+                  key={rt.id}
+                  data-reorder-item="true"
+                  className={`hub-routine-card ${
+                    routines.length > 1 ? 'ex-drag-handle' : ''
+                  } ${isDraggingCard ? 'is-dragging-card' : ''}`}
+                  {...(routines.length > 1
+                    ? hubRoutinesReorder.getHandleProps(rtIdx)
+                    : {})}
+                >
                   <div className="hub-routine-top">
-                    <h4>{rt.name}</h4>
+                    <div className="routine-card-title-row">
+                      {routines.length > 1 && (
+                        <GripVertical
+                          size={15}
+                          className="ex-grip-cue"
+                          data-instant-grip="true"
+                        />
+                      )}
+                      <h4>{rt.name}</h4>
+                    </div>
                     <span className="routine-meta-badge">
                       {rt.exercises?.length || 0} {t.routines.exercisesCount} •{' '}
                       {totalSets} {t.routines.setsCount}
@@ -734,6 +765,12 @@ export default function LiveWorkoutLogger({
           lang={lang}
           t={t}
           onClose={() => setPreviewExercise(null)}
+        />
+
+        <DragFollowerPortal
+          dragState={hubRoutinesReorder.dragState}
+          followerRef={hubRoutinesReorder.followerRef}
+          lang={lang}
         />
       </div>
     );

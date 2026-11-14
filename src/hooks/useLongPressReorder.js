@@ -40,13 +40,28 @@ export function getExerciseItemKey(ex, fallbackIdx = 0) {
   return `idx-${fallbackIdx}`;
 }
 
-function isInteractiveSubTarget(target) {
+function isInteractiveSubTarget(target, currentTarget, ignoreSelector) {
   if (!target || typeof target.closest !== 'function') return false;
-  return Boolean(
+  if (
     target.closest(
-      'button, select, input, textarea, a, .thumb-zoom-btn, .draft-ex-swap-pill'
+      'button, select, input, textarea, a, .thumb-zoom-btn, .draft-ex-swap-pill, .clickable-chip, .ex-preview-chip'
     )
-  );
+  ) {
+    return true;
+  }
+  if (ignoreSelector) {
+    const ignoredEl = target.closest(ignoreSelector);
+    if (ignoredEl && ignoredEl !== currentTarget) {
+      return true;
+    }
+  }
+  if (currentTarget) {
+    const closestHandle = target.closest('[data-drag-handle="true"]');
+    if (closestHandle && closestHandle !== currentTarget) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function findScrollParent(el) {
@@ -89,6 +104,7 @@ export function useLongPressReorder({
   mouseHoldMs = 170,
   getItemLabel,
   getItemThumb,
+  ignoreSelector = null,
 }) {
   const containerRef = useRef(null);
   const followerRef = useRef(null);
@@ -98,6 +114,7 @@ export function useLongPressReorder({
     onDragStart,
     getItemLabel,
     getItemThumb,
+    ignoreSelector,
   });
   latestRef.current = {
     items,
@@ -105,6 +122,7 @@ export function useLongPressReorder({
     onDragStart,
     getItemLabel,
     getItemThumb,
+    ignoreSelector,
   };
 
   const sessionRef = useRef(null);
@@ -119,7 +137,7 @@ export function useLongPressReorder({
     el.style.transform = `translate3d(${x}px, ${y}px, 0)`;
   }, []);
 
-  const evaluateLiveSwap = useCallback((pointerY) => {
+  const evaluateLiveSwap = useCallback((pointerX, pointerY) => {
     const s = sessionRef.current;
     const container = containerRef.current;
     if (!s || s.phase !== 'dragging' || !container) return;
@@ -128,25 +146,101 @@ export function useLongPressReorder({
       (n) => n.getAttribute('data-reorder-item') === 'true'
     );
     const idx = s.currentIdx;
-    if (idx < 0 || idx >= nodes.length) return;
+    if (idx < 0 || idx >= nodes.length || nodes.length < 2) return;
+
+    const rects = nodes.map((n) => n.getBoundingClientRect());
+    const curRect = rects[idx];
+    if (!curRect) return;
+
+    const isSingleColumn = rects.every(
+      (r) => Math.abs(r.left - rects[0].left) < 20
+    );
+
+    const HYST = 16;
+    const canSwapWith = (candIdx) => {
+      const last = s.lastSwap;
+      if (!last || last.displacedNode !== nodes[candIdx]) return true;
+      return Math.hypot(pointerX - last.x, pointerY - last.y) >= HYST;
+    };
 
     let targetIdx = null;
-    if (idx > 0) {
-      const prevRect = nodes[idx - 1]?.getBoundingClientRect();
-      if (prevRect && pointerY < prevRect.top + prevRect.height * 0.5) {
-        targetIdx = idx - 1;
+
+    if (isSingleColumn) {
+      if (idx > 0) {
+        const prevRect = rects[idx - 1];
+        if (
+          prevRect &&
+          canSwapWith(idx - 1) &&
+          pointerY < prevRect.top + prevRect.height * 0.5
+        ) {
+          targetIdx = idx - 1;
+        }
       }
-    }
-    if (targetIdx === null && idx < nodes.length - 1) {
-      const nextRect = nodes[idx + 1]?.getBoundingClientRect();
-      if (nextRect && pointerY > nextRect.top + nextRect.height * 0.5) {
-        targetIdx = idx + 1;
+      if (targetIdx === null && idx < nodes.length - 1) {
+        const nextRect = rects[idx + 1];
+        if (
+          nextRect &&
+          canSwapWith(idx + 1) &&
+          pointerY > nextRect.top + nextRect.height * 0.5
+        ) {
+          targetIdx = idx + 1;
+        }
+      }
+    } else {
+      let bestDist = Infinity;
+      for (let i = 0; i < rects.length; i++) {
+        if (i === idx) continue;
+        const r = rects[i];
+        if (!canSwapWith(i)) continue;
+
+        const sameRow =
+          Math.abs(r.top - curRect.top) <
+          Math.min(r.height, curRect.height) * 0.5;
+
+        let crossed = false;
+        if (sameRow) {
+          const midX = r.left + r.width * 0.5;
+          const inVerticalBand =
+            pointerY >= r.top - 12 && pointerY <= r.bottom + 12;
+          if (inVerticalBand) {
+            if (i < idx && pointerX < midX) crossed = true;
+            if (i > idx && pointerX > midX) crossed = true;
+          }
+        } else {
+          const midY = r.top + r.height * 0.5;
+          const inHorizontalBand =
+            pointerX >= r.left - 16 && pointerX <= r.right + 16;
+          if (i < idx) {
+            if ((inHorizontalBand && pointerY < midY) || pointerY < r.top) {
+              crossed = true;
+            }
+          } else {
+            if ((inHorizontalBand && pointerY > midY) || pointerY > r.bottom) {
+              crossed = true;
+            }
+          }
+        }
+
+        if (crossed) {
+          const cx = r.left + r.width * 0.5;
+          const cy = r.top + r.height * 0.5;
+          const dist = Math.hypot(pointerX - cx, pointerY - cy);
+          if (dist < bestDist) {
+            bestDist = dist;
+            targetIdx = i;
+          }
+        }
       }
     }
 
     if (targetIdx !== null && targetIdx !== idx) {
       const fromIdx = idx;
       s.currentIdx = targetIdx;
+      s.lastSwap = {
+        displacedNode: nodes[targetIdx],
+        x: pointerX,
+        y: pointerY,
+      };
       try {
         navigator.vibrate?.(10);
       } catch {
@@ -154,7 +248,14 @@ export function useLongPressReorder({
       }
       latestRef.current.onReorder?.(fromIdx, targetIdx);
       setDragState((prev) =>
-        prev ? { ...prev, activeIdx: targetIdx } : prev
+        prev
+          ? {
+              ...prev,
+              activeIdx: targetIdx,
+              initialX: s.lastX,
+              initialY: s.lastY,
+            }
+          : prev
       );
     }
   }, []);
@@ -217,6 +318,30 @@ export function useLongPressReorder({
         const sr = scrollParent.getBoundingClientRect();
         topBound = Math.max(0, sr.top);
         bottomBound = Math.min(window.innerHeight || 844, sr.bottom);
+      } else {
+        let dynamicTop = 0;
+        const headerEl = document.querySelector('.alfa-header');
+        if (headerEl && window.getComputedStyle(headerEl).display !== 'none') {
+          dynamicTop = Math.max(
+            dynamicTop,
+            headerEl.getBoundingClientRect().bottom
+          );
+        }
+        const miniBannerEl = document.querySelector(
+          '.active-workout-mini-banner'
+        );
+        if (
+          miniBannerEl &&
+          window.getComputedStyle(miniBannerEl).display !== 'none'
+        ) {
+          dynamicTop = Math.max(
+            dynamicTop,
+            miniBannerEl.getBoundingClientRect().bottom
+          );
+        }
+        if (dynamicTop > 0) {
+          topBound = dynamicTop;
+        }
       }
 
       const mobNav = document.querySelector('.alfa-mobile-bottom-nav');
@@ -253,13 +378,13 @@ export function useLongPressReorder({
           const prevY = window.scrollY;
           window.scrollBy(0, roundedStep);
           if (window.scrollY !== prevY) {
-            evaluateLiveSwap(s.lastY);
+            evaluateLiveSwap(s.lastX, s.lastY);
           }
         } else if (scrollParent instanceof Element) {
           const prevTop = scrollParent.scrollTop;
           scrollParent.scrollTop += roundedStep;
           if (scrollParent.scrollTop !== prevTop) {
-            evaluateLiveSwap(s.lastY);
+            evaluateLiveSwap(s.lastX, s.lastY);
           }
         }
       }
@@ -332,10 +457,19 @@ export function useLongPressReorder({
 
   const getHandleProps = useCallback(
     (index) => ({
+      'data-drag-handle': 'true',
       onTouchStart: (e) => {
         if ((latestRef.current.items?.length || 0) < 2) return;
         if (!e.touches || e.touches.length !== 1) return;
-        if (isInteractiveSubTarget(e.target)) return;
+        if (
+          isInteractiveSubTarget(
+            e.target,
+            e.currentTarget,
+            latestRef.current.ignoreSelector
+          )
+        ) {
+          return;
+        }
 
         cleanupSession();
 
@@ -349,6 +483,7 @@ export function useLongPressReorder({
           lastX: touch.clientX,
           lastY: touch.clientY,
           currentIdx: index,
+          lastSwap: null,
           holdTimer: null,
           rafId: null,
           scrollParent: null,
@@ -382,7 +517,7 @@ export function useLongPressReorder({
             s.lastX = matchedTouch.clientX;
             s.lastY = matchedTouch.clientY;
             positionFollower(matchedTouch.clientX, matchedTouch.clientY, 'touch');
-            evaluateLiveSwap(matchedTouch.clientY);
+            evaluateLiveSwap(matchedTouch.clientX, matchedTouch.clientY);
           }
         };
 
@@ -451,7 +586,15 @@ export function useLongPressReorder({
       onMouseDown: (e) => {
         if (e.button !== 0) return;
         if ((latestRef.current.items?.length || 0) < 2) return;
-        if (isInteractiveSubTarget(e.target)) return;
+        if (
+          isInteractiveSubTarget(
+            e.target,
+            e.currentTarget,
+            latestRef.current.ignoreSelector
+          )
+        ) {
+          return;
+        }
 
         cleanupSession();
 
@@ -469,6 +612,7 @@ export function useLongPressReorder({
           lastX: e.clientX,
           lastY: e.clientY,
           currentIdx: index,
+          lastSwap: null,
           holdTimer: null,
           rafId: null,
           scrollParent: null,
@@ -494,7 +638,7 @@ export function useLongPressReorder({
             s.lastX = ev.clientX;
             s.lastY = ev.clientY;
             positionFollower(ev.clientX, ev.clientY, 'mouse');
-            evaluateLiveSwap(ev.clientY);
+            evaluateLiveSwap(ev.clientX, ev.clientY);
           }
         };
 

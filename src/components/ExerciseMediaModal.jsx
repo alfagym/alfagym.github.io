@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Film, Image as ImageIcon, Info } from 'lucide-react';
 import ExerciseVideoPlayer from './ExerciseVideoPlayer';
+import { isMp4MediaUrl } from '../data/gymData';
 
 export default function ExerciseMediaModal({
   exercise,
@@ -8,9 +9,7 @@ export default function ExerciseMediaModal({
   t,
   onClose,
 }) {
-  const hasVideo = Boolean(
-    exercise?.videoUrl && exercise.videoUrl.toLowerCase().endsWith('.mp4')
-  );
+  const hasVideo = Boolean(isMp4MediaUrl(exercise?.videoUrl));
   const fullImageUrl =
     exercise?.imageUrl ||
     (!hasVideo && exercise?.videoUrl
@@ -20,11 +19,7 @@ export default function ExerciseMediaModal({
   const [viewMode, setViewMode] = useState(hasVideo ? 'video' : 'image');
 
   useEffect(() => {
-    setViewMode(
-      exercise?.videoUrl && exercise.videoUrl.toLowerCase().endsWith('.mp4')
-        ? 'video'
-        : 'image'
-    );
+    setViewMode(isMp4MediaUrl(exercise?.videoUrl) ? 'video' : 'image');
   }, [exercise]);
 
   useEffect(() => {

@@ -3292,18 +3292,6 @@
   display: block;
 }
 
-.thumb-zoom-badge {
-  position: absolute;
-  bottom: 1px;
-  right: 1px;
-  font-size: 9px;
-  line-height: 1;
-  background: rgba(10, 14, 24, 0.82);
-  border-radius: 4px;
-  padding: 2px;
-  pointer-events: none;
-}
-
 .clickable-chip {
   display: inline-flex;
   align-items: center;
@@ -4228,13 +4216,6 @@ body.alfa-dragging-active * {
   background: rgba(15, 23, 42, 0.8);
   color: #38bdf8;
   border-radius: 50%;
-}
-
-.ex-video-badge {
-  background: rgba(56, 189, 248, 0.18) !important;
-  color: #38bdf8 !important;
-  font-weight: 800;
-  border: 1px solid rgba(56, 189, 248, 0.32);
 }
 
 /* ==========================================================================

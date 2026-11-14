@@ -149,11 +149,6 @@ export default function LiveWorkoutLogger({
     return map;
   }, [exercisesLibrary]);
 
-  const hasMp4Video = (exObj) =>
-    Boolean(
-      exObj?.videoUrl && String(exObj.videoUrl).toLowerCase().endsWith('.mp4')
-    );
-
   const lastDoneByRoutine = useMemo(() => {
     return buildRoutineLastDoneMap(routines, workouts, new Date());
   }, [routines, workouts, todaySerial]);
@@ -780,9 +775,6 @@ export default function LiveWorkoutLogger({
                           <span>
                             {exItem.sets?.length || 3}× {getExName(exObj)}
                           </span>
-                          {hasMp4Video(exObj) && (
-                            <span aria-hidden="true">▶</span>
-                          )}
                         </button>
                       );
                     })}
@@ -1189,9 +1181,6 @@ export default function LiveWorkoutLogger({
                         <span className="thumb-fallback-icon">
                           <Film size={15} />
                         </span>
-                      )}
-                      {hasMp4Video(exObj) && (
-                        <span className="thumb-zoom-badge">▶</span>
                       )}
                     </button>
                     <div
@@ -1825,9 +1814,6 @@ export default function LiveWorkoutLogger({
                         <span className="thumb-fallback-icon">
                           <Film size={14} />
                         </span>
-                      )}
-                      {hasMp4Video(ex) && (
-                        <span className="thumb-zoom-badge">▶</span>
                       )}
                     </button>
                     <div

@@ -38,9 +38,6 @@ import {
 import ExerciseMediaModal from './ExerciseMediaModal';
 import ConfirmModal from './ConfirmModal';
 
-const hasMp4Video = (exObj) =>
-  Boolean(exObj?.videoUrl && /\.mp4($|\?)/i.test(exObj.videoUrl));
-
 const SET_TYPE_ORDER = ['normal', 'warmup', 'dropset', 'failure'];
 
 const MUSCLE_KEYS = [
@@ -931,9 +928,6 @@ export default function RoutinesView({
                                   <Film size={14} />
                                 </span>
                               )}
-                              {hasMp4Video(exObj) && (
-                                <span className="thumb-zoom-badge">▶</span>
-                              )}
                             </button>
                           )}
                           <div
@@ -1488,9 +1482,6 @@ function RoutineCardBreakdown({
                         <span className="thumb-fallback-icon">
                           <Film size={14} />
                         </span>
-                      )}
-                      {hasMp4Video(exObj) && (
-                        <span className="thumb-zoom-badge">▶</span>
                       )}
                     </button>
                   )}

@@ -34,8 +34,8 @@ export const EXERCISES_LIBRARY = [
     secondaryMuscles: ["back"],
     equipment: "dumbbell",
     defaultRestSeconds: 45,
-    thumbnailUrl: "https://pump-app.s3.eu-west-2.amazonaws.com/exercise-thumbnails/04101201-Dumbbell-Single-Leg-Split-Squat_Thighs_thumbnail_@3x.jpg",
-    videoUrl: "https://pump-app.s3.eu-west-2.amazonaws.com/exercise-assets/04101201-Dumbbell-Single-Leg-Split-Squat_Thighs_.mp4",
+    thumbnailUrl: "./videos/curtsy-lunge-dumbbell-thumb.jpg",
+    videoUrl: "./videos/curtsy-lunge-dumbbell.mp4",
     imageUrl: "https://pump-app.s3.eu-west-2.amazonaws.com/profile-images/raysantana-014da3dd-4b11-4c74-a72c-5b95b51ee111.jpg",
     tipsEs: "Ejercicio oficial de tu rutina Hevy (Curtsy Bulgarian Split Squat). Descanso sugerido: 45s.",
     tipsEn: "Official exercise from your Hevy routine (Curtsy Bulgarian Split Squat). Suggested rest: 45s.",
@@ -594,8 +594,8 @@ export const EXERCISES_LIBRARY = [
     secondaryMuscles: [],
     equipment: "cable",
     defaultRestSeconds: 45,
-    thumbnailUrl: "https://pump-app.s3.eu-west-2.amazonaws.com/exercise-thumbnails/66071201-Resistance-Band-Lateral-Walk-(male)_Hips_thumbnail_@3x.jpg",
-    videoUrl: "https://pump-app.s3.eu-west-2.amazonaws.com/exercise-assets/66071201-Resistance-Band-Lateral-Walk-(male)_Hips_.mp4",
+    thumbnailUrl: "./videos/side-kick-with-cable-thumb.jpg",
+    videoUrl: "./videos/side-kick-with-cable.mp4",
     imageUrl: "https://pump-app.s3.eu-west-2.amazonaws.com/profile-images/raysantana-70a1ba93-fdc4-4735-b96c-d8a905e2b237.jpg",
     tipsEs: "Ejercicio oficial de tu rutina Hevy (Side Kick with Cable). Descanso sugerido: 45s.",
     tipsEn: "Official exercise from your Hevy routine (Side Kick with Cable). Suggested rest: 45s.",
@@ -1487,8 +1487,8 @@ function normalizeMediaLookupText(value) {
     .trim();
 }
 
-function isMp4MediaUrl(url) {
-  return typeof url === 'string' && url.trim().toLowerCase().endsWith('.mp4');
+export function isMp4MediaUrl(url) {
+  return typeof url === 'string' && /\.mp4($|[?#])/i.test(url.trim());
 }
 
 function getNormalizedLibraryEntries() {
@@ -1517,14 +1517,15 @@ const SYNONYM_MEDIA_RULES = [
   [/\b(femoral|isquio[a-z]*|hamstring[a-z]*|leg curl|curl de pierna[a-z]*|curl femoral)\b/, (t) => (/\b(lying|tumbad[a-z]*|acostad[a-z]*|echad[a-z]*)\b/.test(t) ? 'lying-leg-curl' : 'seated-leg-curl')],
   [/\b(hip thrust|empuje de cadera)\b/, () => 'barbell-hip-thrust'],
   [/\b(glute bridge|puente)\b/, () => 'hevy-cda23948'],
-  [/\b(side kick|patada lateral|band walk|caminata lateral)\b/, () => 'hevy-5df64af8'],
+  [/\b(side kick|patada lateral|cable hip abduction|abduccion.*(polea|cable))\b/, () => 'hevy-5df64af8'],
+  [/\b(band walk|caminata lateral|lateral band)\b/, () => 'hevy-ec02979e'],
   [/\b(abduct[a-z]*|abduc[a-z]*)\b/, () => 'hevy-f4b4c6ee'],
   [/\b(adduct[a-z]*|adduc[a-z]*|aductor[a-z]*|aduccion[a-z]*)\b/, () => 'hevy-8bebfed6'],
   [/\b(patada[a-z]* de tricep[a-z]*|tricep[a-z]* kickback)\b/, () => 'tricep-rope-pushdown'],
   [/\b(kickback[a-z]*|patada de gluteo|patada en polea|donkey)\b/, () => 'hevy-acb2751d'],
   [/\b(goblet|ciclista|cyclist)\b/, () => 'hevy-c7b609b9'],
   [/\b(hack)\b/, () => 'hack-squat-machine'],
-  [/\b(curtsy)\b/, () => 'hevy-71d8cb4a'],
+  [/\b(curtsy|curtsey|reverencia)\b/, () => 'hevy-71d8cb4a'],
   [/\b(bulgar[a-z]*|split squat)\b/, () => 'bulgarian-split-squat'],
   [/\b(lunge[a-z]*|zancada[a-z]*|desplante[a-z]*)\b/, (t) => (/\b(reverse|invertid[a-z]*|atras)\b/.test(t) ? 'hevy-818ba121' : 'hevy-a733cc5b')],
   [/\b(step up|cajon|banco alto)\b/, () => 'hevy-bf6ece89'],
@@ -1618,19 +1619,15 @@ export function resolveExerciseWithMedia(ex, baseMap) {
   // Level 0: non-destructive merge with known base/Hevy exercise
   if (ex.id && activeMap[ex.id]) {
     const base = activeMap[ex.id];
-    const usesOldProfileThumb =
-      typeof ex.thumbnailUrl === 'string' &&
-      (ex.thumbnailUrl.includes('raysantana-') ||
-        (base.imageUrl && ex.thumbnailUrl === base.imageUrl)) &&
-      typeof base.thumbnailUrl === 'string' &&
-      base.thumbnailUrl.includes('/exercise-thumbnails/');
     return {
       ...base,
       ...ex,
-      videoUrl: isMp4MediaUrl(ex.videoUrl) ? ex.videoUrl : base.videoUrl,
-      thumbnailUrl: usesOldProfileThumb
-        ? base.thumbnailUrl
-        : ex.thumbnailUrl || base.thumbnailUrl || null,
+      videoUrl: isMp4MediaUrl(base.videoUrl)
+        ? base.videoUrl
+        : isMp4MediaUrl(ex.videoUrl)
+        ? ex.videoUrl
+        : null,
+      thumbnailUrl: base.thumbnailUrl || ex.thumbnailUrl || null,
       imageUrl: ex.imageUrl || base.imageUrl,
       isFallbackMedia: false,
     };

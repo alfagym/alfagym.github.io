@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import MuscleHeatmapSVG from './MuscleHeatmapSVG';
 import ExerciseVideoPlayer from './ExerciseVideoPlayer';
+import { isMp4MediaUrl } from '../data/gymData';
 import {
   getExerciseStats,
   formatWeightValue,
@@ -227,11 +228,6 @@ export default function ExercisesLibraryView({
                       <span className="equip-tag">
                         {t.equipment[ex.equipment]}
                       </span>
-                      {ex.videoUrl && ex.videoUrl.toLowerCase().endsWith('.mp4') && (
-                        <span className="equip-tag ex-video-badge" title="Tiene video demostrativo">
-                          ▶ Video
-                        </span>
-                      )}
                     </div>
                   </div>
                   {stats.best1RM > 0 && (
@@ -285,8 +281,7 @@ export default function ExercisesLibraryView({
               <div className="ex-demo-video-box">
                 <ExerciseVideoPlayer
                   videoUrl={
-                    selectedExercise.videoUrl &&
-                    selectedExercise.videoUrl.toLowerCase().endsWith('.mp4')
+                    isMp4MediaUrl(selectedExercise.videoUrl)
                       ? selectedExercise.videoUrl
                       : null
                   }

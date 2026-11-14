@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import {
   Dumbbell,
   PlayCircle,
@@ -53,7 +53,7 @@ import AccountModal from './components/AccountModal';
 import './App.css';
 
 /* global __BUILD_TIMESTAMP__ */
-const FALLBACK_TIMESTAMP = '1:40 AM - 11/14/2026';
+const FALLBACK_TIMESTAMP = '2:04 AM - 11/14/2026';
 const BUILD_TIMESTAMP =
   typeof __BUILD_TIMESTAMP__ !== 'undefined'
     ? __BUILD_TIMESTAMP__
@@ -1402,6 +1402,15 @@ export default function App() {
       setAccounts(data.accounts);
   };
 
+  const mainScrollRef = useRef(null);
+  const hasActiveWorkout = Boolean(activeWorkout);
+
+  useLayoutEffect(() => {
+    if (mainScrollRef.current) {
+      mainScrollRef.current.scrollTop = 0;
+    }
+  }, [activeTab, hasActiveWorkout, currentUser?.id]);
+
   // ================= AUTH SCREEN ("ACCESO PRIVADO") =================
   if (!currentUser) {
     return (
@@ -1580,8 +1589,14 @@ export default function App() {
       )}
 
       {/* Main Content Area */}
-      <main className="alfa-main-content">
-        {activeTab === 'workout' && (
+      <div
+        ref={mainScrollRef}
+        className={`alfa-main-scroll ${
+          isLiveWorkoutScreen ? 'is-live-locked' : ''
+        }`}
+      >
+        <main className="alfa-main-content">
+          {activeTab === 'workout' && (
           <LiveWorkoutLogger
             lang={lang}
             unit={unit}
@@ -1665,7 +1680,8 @@ export default function App() {
             setMeasurements={setMeasurements}
           />
         )}
-      </main>
+        </main>
+      </div>
 
       {/* Mobile Bottom Tab Bar (iOS Hevy Style) */}
       <nav className="alfa-mobile-bottom-nav">

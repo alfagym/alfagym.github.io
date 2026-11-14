@@ -25,6 +25,20 @@ import {
   installGlobalAudioUnlock,
   setRestAudioKeepAlive,
   computeWorkoutElapsedSeconds,
+  REST_AUDIO_MODES,
+  getRestAudioMode,
+  setRestAudioMode,
+  startBakedRestTimerAudio,
+  stopBakedRestTimerAudio,
+  hasTimerBellAlreadyRung,
+  isBakedRestAudioPlayingFor,
+  armRestAudioOnNextTap,
+  registerGymServiceWorker,
+  getNotificationPermissionState,
+  requestGymNotificationPermission,
+  sendRestDoneNotification,
+  rotateRoutinesOnComplete,
+  seedInitialSmartRoutineOrder,
 } from './utils/workoutMath';
 import { pushToGitHubGist } from './utils/githubSync';
 import { ensureExercisesUids } from './hooks/useLongPressReorder';
@@ -39,7 +53,7 @@ import AccountModal from './components/AccountModal';
 import './App.css';
 
 /* global __BUILD_TIMESTAMP__ */
-const FALLBACK_TIMESTAMP = '11:42 PM - 11/13/2026';
+const FALLBACK_TIMESTAMP = '12:23 AM - 11/14/2026';
 const BUILD_TIMESTAMP =
   typeof __BUILD_TIMESTAMP__ !== 'undefined'
     ? __BUILD_TIMESTAMP__
@@ -86,6 +100,68 @@ const DEFAULT_ACCOUNTS = [
   },
 ];
 
+const BASE_EXERCISE_MAP = EXERCISES_LIBRARY.reduce((acc, ex) => {
+  acc[ex.id] = ex;
+  return acc;
+}, {});
+
+const EMPTY_REST_TIMER = {
+  active: false,
+  isPaused: false,
+  pausedRemainingMs: null,
+  timerId: null,
+  endTime: null,
+  remaining: 0,
+  total: 90,
+  exerciseName: '',
+};
+
+function loadUserRestTimer(userKey) {
+  if (!userKey) return { ...EMPTY_REST_TIMER };
+  try {
+    const raw = localStorage.getItem(`alfa_gym_rest_timer_${userKey}`);
+    if (!raw) return { ...EMPTY_REST_TIMER };
+    const saved = JSON.parse(raw);
+    if (!saved || !saved.active) return { ...EMPTY_REST_TIMER };
+
+    if (saved.isPaused) {
+      const remMs = Math.max(
+        1000,
+        Number(saved.pausedRemainingMs) || (Number(saved.remaining) || 1) * 1000
+      );
+      return {
+        ...EMPTY_REST_TIMER,
+        ...saved,
+        active: true,
+        isPaused: true,
+        pausedRemainingMs: remMs,
+        endTime: null,
+        remaining: Math.max(1, Math.ceil(remMs / 1000)),
+        total: Math.max(1, Number(saved.total) || 90),
+      };
+    }
+
+    if (!saved.endTime) return { ...EMPTY_REST_TIMER };
+    const msLeft = Number(saved.endTime) - Date.now();
+    if (msLeft <= -4000) {
+      localStorage.removeItem(`alfa_gym_rest_timer_${userKey}`);
+      return { ...EMPTY_REST_TIMER };
+    }
+    const remSec = msLeft <= 0 ? 1 : Math.max(1, Math.ceil(msLeft / 1000));
+    return {
+      ...EMPTY_REST_TIMER,
+      ...saved,
+      active: true,
+      isPaused: false,
+      pausedRemainingMs: null,
+      remaining: remSec,
+      total: Math.max(remSec, Number(saved.total) || 90),
+    };
+  } catch {
+    return { ...EMPTY_REST_TIMER };
+  }
+}
+
 function getUserStorageKey(user) {
   if (!user) return 'raydel';
   return (user.identifier || user.id || 'raydel')
@@ -122,17 +198,41 @@ function loadUserRoutines(userKey) {
     }));
   };
 
+  const applySmartSeedOnce = (list) => {
+    try {
+      const seedKey = `alfa_gym_cycle_seeded_v1_${userKey}`;
+      if (!localStorage.getItem(seedKey)) {
+        const userWorkouts = loadUserWorkouts(userKey);
+        const seeded = seedInitialSmartRoutineOrder(
+          list,
+          userWorkouts,
+          BASE_EXERCISE_MAP
+        );
+        localStorage.setItem(
+          `alfa_gym_routines_${userKey}`,
+          JSON.stringify(seeded)
+        );
+        localStorage.setItem(seedKey, '1');
+        return seeded;
+      }
+    } catch {
+      // ignore storage errors
+    }
+    return list;
+  };
+
   try {
     const userSaved = localStorage.getItem(`alfa_gym_routines_${userKey}`);
     if (userSaved) {
       const parsed = JSON.parse(userSaved);
       if (Array.isArray(parsed) && parsed.length > 0) {
         const merged = mergeMissingHevyRoutines(parsed);
+        const finalList = applySmartSeedOnce(merged);
         localStorage.setItem(
           `alfa_gym_routines_${userKey}`,
-          JSON.stringify(merged)
+          JSON.stringify(finalList)
         );
-        return merged;
+        return finalList;
       }
     }
     // Initial migration for Raydel if legacy key exists
@@ -142,11 +242,12 @@ function loadUserRoutines(userKey) {
         const parsedLegacy = JSON.parse(legacy);
         if (Array.isArray(parsedLegacy) && parsedLegacy.length > 0) {
           const merged = mergeMissingHevyRoutines(parsedLegacy);
+          const finalList = applySmartSeedOnce(merged);
           localStorage.setItem(
             `alfa_gym_routines_${userKey}`,
-            JSON.stringify(merged)
+            JSON.stringify(finalList)
           );
-          return merged;
+          return finalList;
         }
       }
     }
@@ -157,15 +258,16 @@ function loadUserRoutines(userKey) {
     ...rt,
     exercises: ensureExercisesUids(rt.exercises),
   }));
+  const finalFresh = applySmartSeedOnce(freshCopy);
   try {
     localStorage.setItem(
       `alfa_gym_routines_${userKey}`,
-      JSON.stringify(freshCopy)
+      JSON.stringify(finalFresh)
     );
   } catch {
     // ignore
   }
-  return freshCopy;
+  return finalFresh;
 }
 
 function loadUserWorkouts(userKey) {
@@ -366,25 +468,30 @@ export default function App() {
 
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
-  // Rest Timer State (wall-clock endTime for background/lock-screen precision)
-  const [restTimer, setRestTimer] = useState({
-    active: false,
-    isPaused: false,
-    pausedRemainingMs: null,
-    timerId: null,
-    endTime: null,
-    remaining: 0,
-    total: 90,
-    exerciseName: '',
-  });
+  // Rest Timer State (wall-clock endTime + localStorage persistence for background/lock-screen resilience)
+  const [restTimer, setRestTimer] = useState(() =>
+    loadUserRestTimer(getUserStorageKey(currentUser))
+  );
 
-  // Boxing Ring Bell sound toggle (enabled by default)
+  // Rest audio mode & Boxing Ring Bell sound toggle
+  const [restAudioMode, setRestAudioModeState] = useState(() =>
+    getRestAudioMode()
+  );
   const [bellEnabled, setBellEnabled] = useState(() => {
-    return localStorage.getItem('alfa_gym_bell_enabled') !== 'false';
+    const mode = getRestAudioMode();
+    return mode !== 'off' && localStorage.getItem('alfa_gym_bell_enabled') !== 'false';
   });
+  const [notifPermission, setNotifPermission] = useState(() =>
+    getNotificationPermissionState()
+  );
 
   const bellEnabledRef = useRef(bellEnabled);
   const firedTimerIdRef = useRef(null);
+  const armedTimerIdRef = useRef(null);
+  const completedWorkoutIdsRef = useRef(new Set());
+  const pendingUpdateUrlRef = useRef(null);
+  const restTimerActiveRef = useRef(false);
+  const skipRestTimerRef = useRef(null);
 
   useEffect(() => {
     bellEnabledRef.current = bellEnabled;
@@ -393,11 +500,17 @@ export default function App() {
 
   useEffect(() => {
     installGlobalAudioUnlock();
-    return () => setRestAudioKeepAlive(false);
+    registerGymServiceWorker();
+    return () => {
+      stopBakedRestTimerAudio();
+      setRestAudioKeepAlive(false);
+    };
   }, []);
 
   // Switch / Load user data cleanly on login or register
   const handleSelectActiveUser = (userObj) => {
+    stopBakedRestTimerAudio();
+    armedTimerIdRef.current = null;
     setCurrentUser(userObj);
     if (userObj) {
       const uKey = getUserStorageKey(userObj);
@@ -406,9 +519,12 @@ export default function App() {
       setMeasurements(loadUserMeasurements(uKey));
       setCustomExercises(loadUserCustomExercises(uKey));
       setActiveWorkout(loadUserActiveWorkout(uKey));
+      setRestTimer(loadUserRestTimer(uKey));
       if (userObj.preferredUnit) {
         setUnit(userObj.preferredUnit);
       }
+    } else {
+      setRestTimer({ ...EMPTY_REST_TIMER });
     }
   };
 
@@ -425,6 +541,8 @@ export default function App() {
         'alfa_gym_custom_exercises_',
         'alfa_gym_active_workout_',
         'alfa_gym_deleted_routines_',
+        'alfa_gym_rest_timer_',
+        'alfa_gym_cycle_seeded_v1_',
       ];
       for (const prefix of prefixes) {
         const val = localStorage.getItem(`${prefix}${oldKey}`);
@@ -443,13 +561,13 @@ export default function App() {
     }
   };
 
-  // Ensure both Raydel and Lorena Santana have their 6 Hevy routines pre-synced & sample routines cleaned
+  // Ensure both Raydel and Lorena Santana have their 6 Hevy routines pre-synced & seeded into Upper->Abs->Legs cycle
   useEffect(() => {
     loadUserRoutines('raydel');
     loadUserRoutines('lorena');
   }, []);
 
-  // Automatic Live Update Checker for Mobile / iOS Home Screen PWA
+  // Automatic Live Update Checker for Mobile / iOS Home Screen PWA (deferred if resting!)
   useEffect(() => {
     const checkRemoteUpdate = async () => {
       try {
@@ -465,7 +583,11 @@ export default function App() {
           data.buildTimestamp !== BUILD_TIMESTAMP
         ) {
           const nextUrl = `${window.location.pathname}?v=${data.buildId || Date.now()}`;
-          window.location.replace(nextUrl);
+          if (restTimerActiveRef.current) {
+            pendingUpdateUrlRef.current = nextUrl;
+          } else {
+            window.location.replace(nextUrl);
+          }
         }
       } catch {
         // ignore network errors while offline
@@ -477,6 +599,7 @@ export default function App() {
     const onVisible = () => {
       if (document.visibilityState === 'visible') {
         checkRemoteUpdate();
+        setNotifPermission(getNotificationPermissionState());
       }
     };
     window.addEventListener('focus', checkRemoteUpdate);
@@ -577,18 +700,91 @@ export default function App() {
     return () => clearInterval(interval);
   }, [activeWorkout]);
 
+  // Persist restTimer across reloads / background kills & flush deferred remote update when idle
+  useEffect(() => {
+    restTimerActiveRef.current = Boolean(restTimer.active && !restTimer.isPaused);
+    if (currentUser) {
+      try {
+        if (restTimer.active) {
+          localStorage.setItem(
+            `alfa_gym_rest_timer_${activeUserKey}`,
+            JSON.stringify(restTimer)
+          );
+        } else {
+          localStorage.removeItem(`alfa_gym_rest_timer_${activeUserKey}`);
+        }
+      } catch {
+        // Ignore storage errors
+      }
+    }
+    if (!restTimer.active && pendingUpdateUrlRef.current) {
+      const targetUrl = pendingUpdateUrlRef.current;
+      pendingUpdateUrlRef.current = null;
+      window.location.replace(targetUrl);
+    }
+  }, [restTimer, activeUserKey, currentUser]);
+
   // Keep screen awake via Screen Wake Lock while rest timer is actively counting down (and not paused)
   useEffect(() => {
     setRestAudioKeepAlive(restTimer.active && !restTimer.isPaused);
   }, [restTimer.active, restTimer.isPaused]);
 
-  // Rest Timer Ticker (wall-clock endTime + 25s background grace window, zero side-effects inside setState)
+  // Re-arm baked WAV on next touch if restored after cold reload while counting down
+  useEffect(() => {
+    if (
+      !restTimer.active ||
+      restTimer.isPaused ||
+      !restTimer.endTime ||
+      restTimer.endTime <= Date.now() ||
+      armedTimerIdRef.current === restTimer.timerId ||
+      hasTimerBellAlreadyRung(restTimer.timerId) ||
+      !bellEnabledRef.current ||
+      getRestAudioMode() === 'off'
+    ) {
+      return undefined;
+    }
+
+    const expectedTimerId = restTimer.timerId;
+    armRestAudioOnNextTap(() => {
+      const msLeft = restTimer.endTime - Date.now();
+      if (msLeft <= 150) return null;
+      armedTimerIdRef.current = expectedTimerId;
+      return {
+        timerId: expectedTimerId,
+        remainingMs: msLeft,
+        totalSec: restTimer.total,
+        exerciseName: restTimer.exerciseName,
+        lang,
+        onBellRung: (tid) => {
+          firedTimerIdRef.current = tid;
+          setRestTimer((prev) =>
+            prev.timerId === tid && prev.active
+              ? { ...EMPTY_REST_TIMER }
+              : prev
+          );
+        },
+        onSkipFromLockScreen: () => skipRestTimerRef.current?.(),
+      };
+    });
+    return undefined;
+  }, [
+    restTimer.active,
+    restTimer.isPaused,
+    restTimer.endTime,
+    restTimer.timerId,
+    restTimer.total,
+    restTimer.exerciseName,
+    lang,
+  ]);
+
+  // Rest Timer Ticker (wall-clock endTime + 25s background grace window, zero double-bell vs baked WAV)
   useEffect(() => {
     if (!restTimer.active || restTimer.isPaused || !restTimer.endTime) return;
 
     const GRACE_MS = 25000;
     const currentTimerId = restTimer.timerId;
     const targetEndTime = restTimer.endTime;
+    const exLabel = restTimer.exerciseName;
 
     const checkRestClock = () => {
       const now = Date.now();
@@ -596,15 +792,43 @@ export default function App() {
 
       if (msLeft <= 0) {
         const overdueMs = now - targetEndTime;
+        const alreadyRungByStream = hasTimerBellAlreadyRung(currentTimerId);
+        const streamCurrentlyPlaying =
+          isBakedRestAudioPlayingFor(currentTimerId);
+
         if (firedTimerIdRef.current !== currentTimerId) {
           firedTimerIdRef.current = currentTimerId;
-          if (bellEnabledRef.current && overdueMs <= GRACE_MS) {
-            playGymSound('timerDone');
+          const soundAllowed =
+            bellEnabledRef.current && getRestAudioMode() !== 'off';
+
+          // If the baked stream is NOT actively playing the bell right now (e.g., interrupted/cold reload/off), play fallback bell
+          if (!alreadyRungByStream && !streamCurrentlyPlaying) {
+            if (soundAllowed && overdueMs <= GRACE_MS) {
+              playGymSound('timerDone');
+            }
+          }
+          if (!alreadyRungByStream && overdueMs <= GRACE_MS) {
+            sendRestDoneNotification({
+              exerciseName: exLabel,
+              lang,
+              silent: soundAllowed,
+            });
           }
         }
+
+        // Only stop baked audio if it is NOT actively inside/starting its bell tail
+        if (!streamCurrentlyPlaying) {
+          stopBakedRestTimerAudio();
+        }
+
         setRestTimer((prev) =>
           prev.active
-            ? { ...prev, active: false, endTime: null, remaining: 0 }
+            ? {
+                ...prev,
+                active: false,
+                endTime: null,
+                remaining: 0,
+              }
             : prev
         );
         return;
@@ -638,12 +862,27 @@ export default function App() {
       window.removeEventListener('focus', checkRestClock);
       window.removeEventListener('pageshow', checkRestClock);
     };
-  }, [restTimer.active, restTimer.endTime, restTimer.timerId]);
+  }, [
+    restTimer.active,
+    restTimer.isPaused,
+    restTimer.endTime,
+    restTimer.timerId,
+    restTimer.exerciseName,
+    lang,
+  ]);
 
   const t = translations[lang] || translations.es;
 
   const fullExercisesLibrary = useMemo(() => {
     return [...customExercises, ...EXERCISES_LIBRARY];
+  }, [customExercises]);
+
+  const fullExerciseMap = useMemo(() => {
+    const map = { ...BASE_EXERCISE_MAP };
+    for (const ex of customExercises) {
+      if (ex?.id) map[ex.id] = ex;
+    }
+    return map;
   }, [customExercises]);
 
   const handleAddCustomExercise = (exData) => {
@@ -655,15 +894,49 @@ export default function App() {
     return created;
   };
 
+  const skipRestTimer = () => {
+    stopBakedRestTimerAudio();
+    armedTimerIdRef.current = null;
+    setRestTimer({ ...EMPTY_REST_TIMER });
+  };
+  skipRestTimerRef.current = skipRestTimer;
+
+  const armBakedRestStream = (timerId, remainingMs, totalSec, exerciseName) => {
+    if (!bellEnabledRef.current || getRestAudioMode() === 'off') {
+      stopBakedRestTimerAudio();
+      armedTimerIdRef.current = null;
+      return;
+    }
+    armedTimerIdRef.current = timerId;
+    startBakedRestTimerAudio({
+      timerId,
+      remainingMs,
+      totalSec,
+      exerciseName,
+      lang,
+      onBellRung: (tid) => {
+        firedTimerIdRef.current = tid;
+        setRestTimer((prev) =>
+          prev.timerId === tid && prev.active ? { ...EMPTY_REST_TIMER } : prev
+        );
+      },
+      onSkipFromLockScreen: () => skipRestTimerRef.current?.(),
+    });
+  };
+
   const startRestTimer = (seconds, exerciseName = '') => {
     unlockGymAudio();
     const cleanSec = Math.max(1, Number(seconds) || 60);
+    const timerId = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const remainingMs = cleanSec * 1000;
+    const endTime = Date.now() + remainingMs;
+    armBakedRestStream(timerId, remainingMs, cleanSec, exerciseName);
     setRestTimer({
       active: true,
       isPaused: false,
       pausedRemainingMs: null,
-      timerId: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      endTime: Date.now() + cleanSec * 1000,
+      timerId,
+      endTime,
       remaining: cleanSec,
       total: cleanSec,
       exerciseName,
@@ -672,63 +945,57 @@ export default function App() {
 
   const adjustRestTimer = (deltaSeconds) => {
     unlockGymAudio();
-    setRestTimer((prev) => {
-      if (!prev.active) return prev;
-      if (prev.isPaused) {
-        const basePausedMs =
-          prev.pausedRemainingMs != null
-            ? prev.pausedRemainingMs
-            : prev.remaining * 1000;
-        const nextPausedMs = basePausedMs + deltaSeconds * 1000;
-        const nextRemPaused = Math.max(0, Math.ceil(nextPausedMs / 1000));
-        if (nextRemPaused <= 0) {
-          return {
-            ...prev,
-            active: false,
-            isPaused: false,
-            pausedRemainingMs: null,
-            endTime: null,
-            remaining: 0,
-          };
-        }
-        return {
-          ...prev,
-          pausedRemainingMs: nextPausedMs,
-          remaining: nextRemPaused,
-          total: Math.max(prev.total, nextRemPaused),
-        };
-      }
-      const baseEnd = prev.endTime || Date.now() + prev.remaining * 1000;
-      const nextEndTime = baseEnd + deltaSeconds * 1000;
-      const nextRem = Math.max(0, Math.ceil((nextEndTime - Date.now()) / 1000));
-      if (nextRem <= 0) {
-        return {
-          ...prev,
-          active: false,
-          isPaused: false,
-          pausedRemainingMs: null,
-          endTime: null,
-          remaining: 0,
-        };
-      }
-      return {
-        ...prev,
-        endTime: nextEndTime,
-        remaining: nextRem,
-        total: Math.max(prev.total, nextRem),
-      };
-    });
-  };
+    if (!restTimer.active) return;
 
-  const skipRestTimer = () => {
-    setRestTimer((prev) => ({
-      ...prev,
-      active: false,
-      isPaused: false,
-      pausedRemainingMs: null,
-      endTime: null,
-      remaining: 0,
-    }));
+    if (restTimer.isPaused) {
+      const basePausedMs =
+        restTimer.pausedRemainingMs != null
+          ? restTimer.pausedRemainingMs
+          : restTimer.remaining * 1000;
+      const nextPausedMs = basePausedMs + deltaSeconds * 1000;
+      const nextRemPaused = Math.max(0, Math.ceil(nextPausedMs / 1000));
+      if (nextRemPaused <= 0) {
+        skipRestTimer();
+        return;
+      }
+      setRestTimer((prev) =>
+        prev.active
+          ? {
+              ...prev,
+              pausedRemainingMs: nextPausedMs,
+              remaining: nextRemPaused,
+              total: Math.max(prev.total, nextRemPaused),
+            }
+          : prev
+      );
+      return;
+    }
+
+    const baseEnd = restTimer.endTime || Date.now() + restTimer.remaining * 1000;
+    const nextEndTime = baseEnd + deltaSeconds * 1000;
+    const nextMsLeft = nextEndTime - Date.now();
+    const nextRem = Math.max(0, Math.ceil(nextMsLeft / 1000));
+    if (nextRem <= 0) {
+      skipRestTimer();
+      return;
+    }
+    const nextTotal = Math.max(restTimer.total, nextRem);
+    armBakedRestStream(
+      restTimer.timerId,
+      nextMsLeft,
+      nextTotal,
+      restTimer.exerciseName
+    );
+    setRestTimer((prev) =>
+      prev.active
+        ? {
+            ...prev,
+            endTime: nextEndTime,
+            remaining: nextRem,
+            total: Math.max(prev.total, nextRem),
+          }
+        : prev
+    );
   };
 
   const handleTogglePauseWorkout = () => {
@@ -757,6 +1024,22 @@ export default function App() {
         totalPausedMs: (Number(prev.totalPausedMs) || 0) + pauseDelta,
       };
     });
+
+    if (willPause) {
+      stopBakedRestTimerAudio();
+      armedTimerIdRef.current = null;
+    } else if (restTimer.active && restTimer.isPaused) {
+      const resumeMs =
+        restTimer.pausedRemainingMs != null
+          ? restTimer.pausedRemainingMs
+          : Math.max(1000, restTimer.remaining * 1000);
+      armBakedRestStream(
+        restTimer.timerId,
+        resumeMs,
+        restTimer.total,
+        restTimer.exerciseName
+      );
+    }
 
     setRestTimer((prev) => {
       if (!prev.active) return prev;
@@ -788,14 +1071,77 @@ export default function App() {
     });
   };
 
-  const handleToggleBellSound = () => {
-    const next = !bellEnabled;
-    setBellEnabled(next);
-    if (next) {
-      // Play boxing bell sample immediately when turning bell ON so user hears & verifies volume in Silent Mode
-      playGymSound('timerDone');
+  const handleCycleRestAudioMode = () => {
+    const idx = REST_AUDIO_MODES.indexOf(restAudioMode);
+    const nextMode = REST_AUDIO_MODES[(idx + 1) % REST_AUDIO_MODES.length];
+    setRestAudioMode(nextMode);
+    setRestAudioModeState(nextMode);
+    const nextEnabled = nextMode !== 'off';
+    bellEnabledRef.current = nextEnabled;
+    setBellEnabled(nextEnabled);
+
+    if (nextMode === 'off') {
+      stopBakedRestTimerAudio();
+      armedTimerIdRef.current = null;
+      return;
+    }
+    if (restTimer.active && !restTimer.isPaused && restTimer.endTime) {
+      const remMs = restTimer.endTime - Date.now();
+      if (remMs > 150) {
+        armBakedRestStream(
+          restTimer.timerId,
+          remMs,
+          restTimer.total,
+          restTimer.exerciseName
+        );
+      }
     } else {
       unlockGymAudio();
+    }
+  };
+
+  const handleEnableNotifications = async () => {
+    const perm = await requestGymNotificationPermission();
+    setNotifPermission(perm);
+    if (perm === 'granted') {
+      sendRestDoneNotification({
+        exerciseName:
+          lang === 'es'
+            ? 'Notificaciones de descanso activadas ✓'
+            : 'Rest notifications enabled ✓',
+        lang,
+        silent: true,
+      });
+    }
+  };
+
+  const handleToggleBellSound = () => {
+    const next = !bellEnabled;
+    bellEnabledRef.current = next;
+    setBellEnabled(next);
+    if (next) {
+      if (restAudioMode === 'off') {
+        setRestAudioMode('background');
+        setRestAudioModeState('background');
+      }
+      if (restTimer.active && !restTimer.isPaused && restTimer.endTime) {
+        const remMs = restTimer.endTime - Date.now();
+        if (remMs > 150) {
+          armBakedRestStream(
+            restTimer.timerId,
+            remMs,
+            restTimer.total,
+            restTimer.exerciseName
+          );
+        }
+      } else {
+        playGymSound('timerDone');
+      }
+    } else {
+      setRestAudioMode('off');
+      setRestAudioModeState('off');
+      stopBakedRestTimerAudio();
+      armedTimerIdRef.current = null;
     }
   };
 
@@ -860,17 +1206,20 @@ export default function App() {
   // Save current live workout exercises/weights/sets back into the user's routine
   const handleSaveActiveToRoutine = (workoutSnapshot) => {
     if (!workoutSnapshot) return;
-    const mappedExercises = (workoutSnapshot.exercises || []).map((ex) => ({
-      exerciseId: ex.exerciseId,
-      restSeconds: Number(ex.restSeconds) || 45,
-      note: ex.note || '',
-      sets: (ex.sets || []).map((s) => ({
-        type: s.type || 'normal',
-        weight: Number(s.weight) || 0,
-        reps: Number(s.reps) || 0,
-        rpe: Number(s.rpe) || 8,
-      })),
-    }));
+    const mappedExercises = ensureExercisesUids(
+      (workoutSnapshot.exercises || []).map((ex) => ({
+        _uid: ex._uid,
+        exerciseId: ex.exerciseId,
+        restSeconds: Number(ex.restSeconds) || 45,
+        note: ex.note || '',
+        sets: (ex.sets || []).map((s) => ({
+          type: s.type || 'normal',
+          weight: Number(s.weight) || 0,
+          reps: Number(s.reps) || 0,
+          rpe: Number(s.rpe) || 8,
+        })),
+      }))
+    );
 
     if (workoutSnapshot.routineId) {
       setRoutines((prev) =>
@@ -946,48 +1295,60 @@ export default function App() {
       if (activeUserKey) {
         try {
           localStorage.removeItem(`alfa_gym_deleted_routines_${activeUserKey}`);
+          localStorage.setItem(`alfa_gym_cycle_seeded_v1_${activeUserKey}`, '1');
         } catch {
           // Ignore storage errors
         }
       }
-      setRoutines(
-        JSON.parse(JSON.stringify(DEFAULT_ROUTINES)).map((rt) => ({
-          ...rt,
-          exercises: ensureExercisesUids(rt.exercises),
-        }))
-      );
+      const restored = JSON.parse(JSON.stringify(DEFAULT_ROUTINES)).map((rt) => ({
+        ...rt,
+        exercises: ensureExercisesUids(rt.exercises),
+      }));
+      setRoutines(seedInitialSmartRoutineOrder(restored, [], fullExerciseMap));
     }
   };
 
   const handleFinishWorkout = async (completedRecord) => {
+    if (!completedRecord?.id) return;
+    if (completedWorkoutIdsRef.current.has(completedRecord.id)) return;
+    completedWorkoutIdsRef.current.add(completedRecord.id);
+
     const updatedWorkouts = [completedRecord, ...workouts];
     setWorkouts(updatedWorkouts);
 
-    // Automatically update the user's routine with any new weights/reps/sets from today's session
+    // Automatically update the completed routine's weights/reps/sets (preserving UIDs) AND rotate Upper -> Abs -> Legs
     let updatedRoutines = routines;
     if (
       completedRecord.routineId &&
       Array.isArray(completedRecord.exercises) &&
       completedRecord.exercises.length > 0
     ) {
-      updatedRoutines = routines.map((rt) => {
+      const updatedWithWeights = routines.map((rt) => {
         if (rt.id !== completedRecord.routineId) return rt;
         return {
           ...rt,
           name: completedRecord.name || rt.name,
-          exercises: completedRecord.exercises.map((ex) => ({
-            exerciseId: ex.exerciseId,
-            restSeconds: Number(ex.restSeconds) || 45,
-            note: ex.note || '',
-            sets: (ex.sets || []).map((s) => ({
-              type: s.type || 'normal',
-              weight: Number(s.weight) || 0,
-              reps: Number(s.reps) || 0,
-              rpe: Number(s.rpe) || 8,
-            })),
-          })),
+          exercises: ensureExercisesUids(
+            completedRecord.exercises.map((ex) => ({
+              _uid: ex._uid,
+              exerciseId: ex.exerciseId,
+              restSeconds: Number(ex.restSeconds) || 45,
+              note: ex.note || '',
+              sets: (ex.sets || []).map((s) => ({
+                type: s.type || 'normal',
+                weight: Number(s.weight) || 0,
+                reps: Number(s.reps) || 0,
+                rpe: Number(s.rpe) || 8,
+              })),
+            }))
+          ),
         };
       });
+      updatedRoutines = rotateRoutinesOnComplete(
+        updatedWithWeights,
+        completedRecord.routineId,
+        fullExerciseMap
+      );
       setRoutines(updatedRoutines);
     }
 
@@ -1026,7 +1387,14 @@ export default function App() {
 
   const handleRestoreCloudPayload = (data) => {
     if (Array.isArray(data.workouts)) setWorkouts(data.workouts);
-    if (Array.isArray(data.routines)) setRoutines(data.routines);
+    if (Array.isArray(data.routines)) {
+      setRoutines(
+        data.routines.map((rt) => ({
+          ...rt,
+          exercises: ensureExercisesUids(rt.exercises),
+        }))
+      );
+    }
     if (Array.isArray(data.customExercises))
       setCustomExercises(data.customExercises);
     if (Array.isArray(data.measurements)) setMeasurements(data.measurements);
@@ -1170,7 +1538,7 @@ export default function App() {
           <button
             type="button"
             className="header-logout-btn"
-            onClick={() => setCurrentUser(null)}
+            onClick={() => handleSelectActiveUser(null)}
             title={t.nav.logout}
           >
             <LogOut size={15} />
@@ -1229,6 +1597,10 @@ export default function App() {
             bellEnabled={bellEnabled}
             onToggleBellSound={handleToggleBellSound}
             onPreviewBellSound={handlePreviewBellSound}
+            restAudioMode={restAudioMode}
+            onCycleRestAudioMode={handleCycleRestAudioMode}
+            notifPermission={notifPermission}
+            onEnableNotifications={handleEnableNotifications}
             exercisesLibrary={fullExercisesLibrary}
             onAddCustomExercise={handleAddCustomExercise}
             routines={routines}

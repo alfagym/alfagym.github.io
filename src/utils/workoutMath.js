@@ -238,6 +238,183 @@ export function computeWorkoutElapsedSeconds(workout, now = Date.now()) {
   return Math.floor(netMs / 1000);
 }
 
+// ============================================================================
+// Smart Cyclic Routine Queue (Upper -> Abs -> Legs -> Upper -> Abs -> Legs...)
+// ============================================================================
+export const CYCLE_CATEGORIES = ['upper', 'abs', 'legs'];
+
+export const HEVY_CATEGORY_BY_ID = {
+  'routine-hevy-XODnikC6ffn': 'upper', // 2 Chest + Shoulders + Triceps
+  'routine-hevy-AYLtHwMaKBX': 'upper', // 4 Back + Traps + Biceps + Forearms
+  'routine-hevy-c9Hs8il7QDL': 'abs',   // 6 Abs
+  'routine-hevy-s51IPm40DcI': 'legs',  // 1 Quads + Hamstrings + Calves + Abs + Glutes
+  'routine-hevy-3AQ79F9MTjO': 'legs',  // 3 Quads + Adductors + Calves + Abs + Glutes
+  'routine-hevy-dFkFaPdj9eE': 'legs',  // 5 Hamstrings + Abductors + Calves + Abs + Glutes
+};
+
+export const CANONICAL_INITIAL_HEVY_ORDER = [
+  'routine-hevy-XODnikC6ffn', // Upper 1
+  'routine-hevy-c9Hs8il7QDL', // Abs 1
+  'routine-hevy-s51IPm40DcI', // Legs 1
+  'routine-hevy-AYLtHwMaKBX', // Upper 2
+  'routine-hevy-3AQ79F9MTjO', // Legs 2
+  'routine-hevy-dFkFaPdj9eE', // Legs 3
+];
+
+const LEG_MUSCLES = new Set(['quads', 'hamstrings', 'glutes', 'calves']);
+const UPPER_MUSCLES = new Set([
+  'chest',
+  'back',
+  'shoulders',
+  'biceps',
+  'triceps',
+  'forearms',
+  'traps',
+]);
+
+export function getRoutineCycleCategory(routine, exerciseMap = {}) {
+  if (!routine) return 'custom';
+  if (
+    routine.cycleCategory === 'upper' ||
+    routine.cycleCategory === 'abs' ||
+    routine.cycleCategory === 'legs' ||
+    routine.cycleCategory === 'custom'
+  ) {
+    return routine.cycleCategory;
+  }
+  if (routine.id && HEVY_CATEGORY_BY_ID[routine.id]) {
+    return HEVY_CATEGORY_BY_ID[routine.id];
+  }
+
+  let legsCount = 0;
+  let absCount = 0;
+  let upperCount = 0;
+  let total = 0;
+
+  for (const exItem of routine.exercises || []) {
+    const def = exerciseMap[exItem?.exerciseId];
+    const muscle = def?.primaryMuscle;
+    if (!muscle) continue;
+    total++;
+    if (LEG_MUSCLES.has(muscle)) legsCount++;
+    else if (muscle === 'abs') absCount++;
+    else if (UPPER_MUSCLES.has(muscle)) upperCount++;
+  }
+
+  if (total > 0) {
+    if (legsCount / total >= 0.5) return 'legs';
+    if (absCount / total >= 0.5) return 'abs';
+    if (upperCount / total >= 0.5) return 'upper';
+  }
+
+  const name = String(routine.name || '');
+  if (/pierna|leg|quad|hamstring|glute/i.test(name)) return 'legs';
+  if (/\babs\b|abdom|core/i.test(name)) return 'abs';
+  if (
+    /chest|pecho|back|espalda|upper|push|pull|shoulder|hombro|arm|brazo/i.test(
+      name
+    )
+  ) {
+    return 'upper';
+  }
+  return 'custom';
+}
+
+export function rotateRoutinesOnComplete(
+  routines,
+  completedRoutineId,
+  exerciseMap = {}
+) {
+  if (
+    !Array.isArray(routines) ||
+    routines.length <= 1 ||
+    !completedRoutineId
+  ) {
+    return Array.isArray(routines) ? routines : [];
+  }
+
+  const idx = routines.findIndex((r) => r && r.id === completedRoutineId);
+  if (idx === -1) return routines;
+
+  const completedRt = routines[idx];
+  const remaining = routines.filter((r) => r && r.id !== completedRoutineId);
+  const completedCat = getRoutineCycleCategory(completedRt, exerciseMap);
+
+  if (!CYCLE_CATEGORIES.includes(completedCat)) {
+    return [...remaining, completedRt];
+  }
+
+  const buckets = { upper: [], abs: [], legs: [] };
+  const customList = [];
+
+  for (const r of remaining) {
+    const cat = getRoutineCycleCategory(r, exerciseMap);
+    if (CYCLE_CATEGORIES.includes(cat)) {
+      buckets[cat].push(r);
+    } else {
+      customList.push(r);
+    }
+  }
+
+  let cursor = (CYCLE_CATEGORIES.indexOf(completedCat) + 1) % CYCLE_CATEGORIES.length;
+  const scheduled = [];
+  const totalCyclic =
+    buckets.upper.length + buckets.abs.length + buckets.legs.length;
+
+  while (scheduled.length < totalCyclic) {
+    for (let offset = 0; offset < CYCLE_CATEGORIES.length; offset++) {
+      const cat = CYCLE_CATEGORIES[(cursor + offset) % CYCLE_CATEGORIES.length];
+      if (buckets[cat].length > 0) {
+        scheduled.push(buckets[cat].shift());
+        cursor = (CYCLE_CATEGORIES.indexOf(cat) + 1) % CYCLE_CATEGORIES.length;
+        break;
+      }
+    }
+  }
+
+  return [...scheduled, ...customList, completedRt];
+}
+
+export function seedInitialSmartRoutineOrder(
+  routines,
+  workouts = [],
+  exerciseMap = {}
+) {
+  if (!Array.isArray(routines) || routines.length === 0) return [];
+
+  const byId = new Map();
+  for (const r of routines) {
+    if (r?.id) byId.set(r.id, r);
+  }
+
+  const seeded = [];
+  const canonicalSet = new Set(CANONICAL_INITIAL_HEVY_ORDER);
+  for (const id of CANONICAL_INITIAL_HEVY_ORDER) {
+    if (byId.has(id)) {
+      seeded.push(byId.get(id));
+    }
+  }
+  for (const r of routines) {
+    if (!r?.id || !canonicalSet.has(r.id)) {
+      seeded.push(r);
+    }
+  }
+
+  if (!Array.isArray(workouts) || workouts.length === 0) {
+    return seeded;
+  }
+
+  const sortedChrono = [...workouts]
+    .filter((w) => w && w.routineId)
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+  let ordered = seeded;
+  for (const wk of sortedChrono) {
+    ordered = rotateRoutinesOnComplete(ordered, wk.routineId, exerciseMap);
+  }
+  return ordered;
+}
+
 // Synthesized Boxing Ring Bell & Resilient PWA Audio Engine
 export {
   playGymSound,
@@ -245,5 +422,17 @@ export {
   unlockGymAudio,
   installGlobalAudioUnlock,
   setRestAudioKeepAlive,
+  REST_AUDIO_MODES,
+  getRestAudioMode,
+  setRestAudioMode,
+  startBakedRestTimerAudio,
+  stopBakedRestTimerAudio,
+  hasTimerBellAlreadyRung,
+  isBakedRestAudioPlayingFor,
+  armRestAudioOnNextTap,
+  registerGymServiceWorker,
+  getNotificationPermissionState,
+  requestGymNotificationPermission,
+  sendRestDoneNotification,
 } from './soundEngine';
 

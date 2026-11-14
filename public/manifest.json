@@ -2,12 +2,19 @@
   "name": "Alfa Gym — Workout Tracker & Gym Log",
   "short_name": "Alfa Gym",
   "description": "Registro profesional de entrenamientos, rutinas, récords personales y analíticas.",
+  "scope": "./",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#0a0d14",
   "theme_color": "#1d8cf8",
   "orientation": "portrait-primary",
   "icons": [
+    {
+      "src": "./apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    },
     {
       "src": "./alfa-icon.svg",
       "sizes": "any",

@@ -29,6 +29,7 @@ import {
   getExerciseItemKey,
 } from '../hooks/useLongPressReorder';
 import ExerciseMediaModal from './ExerciseMediaModal';
+import ConfirmModal from './ConfirmModal';
 
 const SET_TYPE_ORDER = ['normal', 'warmup', 'dropset', 'failure'];
 
@@ -79,6 +80,7 @@ export default function RoutinesView({
   const [previewExercise, setPreviewExercise] = useState(null);
   const [exSearch, setExSearch] = useState('');
   const [pickerMuscle, setPickerMuscle] = useState('all');
+  const [confirmDialog, setConfirmDialog] = useState(null);
 
   // Custom exercise creator inside routine modal
   const [showCustomCreator, setShowCustomCreator] = useState(false);
@@ -252,17 +254,24 @@ export default function RoutinesView({
   };
 
   const handleDeleteRoutine = (rt) => {
-    const msg =
-      lang === 'es'
-        ? `¿Eliminar la rutina "${rt.name}" de tu perfil?`
-        : `Delete routine "${rt.name}" from your profile?`;
-    if (window.confirm(msg)) {
-      if (onDeleteRoutine) {
-        onDeleteRoutine(rt.id);
-      } else {
-        setRoutines((prev) => prev.filter((r) => r.id !== rt.id));
-      }
-    }
+    setConfirmDialog({
+      title: lang === 'es' ? '¿Eliminar rutina?' : 'Delete routine?',
+      message:
+        lang === 'es'
+          ? `¿Seguro que quieres eliminar la rutina "${rt.name}" de tu perfil?`
+          : `Are you sure you want to delete routine "${rt.name}" from your profile?`,
+      confirmLabel: lang === 'es' ? 'Eliminar' : 'Delete',
+      cancelLabel: lang === 'es' ? 'Cancelar' : 'Cancel',
+      danger: true,
+      onConfirm: () => {
+        setConfirmDialog(null);
+        if (onDeleteRoutine) {
+          onDeleteRoutine(rt.id);
+        } else {
+          setRoutines((prev) => prev.filter((r) => r.id !== rt.id));
+        }
+      },
+    });
   };
 
   const handleMoveRoutineCard = (rtId, direction) => {
@@ -293,8 +302,12 @@ export default function RoutinesView({
     const finalRoutine = {
       ...editingRoutine,
       name: cleanName,
+      cycleCategory: editingRoutine.cycleCategory || undefined,
       exercises: normalizedExercises,
     };
+    if (!finalRoutine.cycleCategory) {
+      delete finalRoutine.cycleCategory;
+    }
 
     if (editingRoutine.id) {
       setRoutines((prev) =>
@@ -403,6 +416,60 @@ export default function RoutinesView({
         nextExs[exIdx] = { ...nextExs[exIdx], sets: nextSets };
       }
       return { ...prev, exercises: nextExs };
+    });
+  };
+
+  const requestRemoveDraftSet = (exIdx, sIdx) => {
+    const ex = editingRoutine?.exercises?.[exIdx];
+    const exDef = exerciseMap[ex?.exerciseId];
+    const exName = getExName(exDef);
+    const isLastSet = (ex?.sets?.length || 0) <= 1;
+    setConfirmDialog({
+      title: isLastSet
+        ? lang === 'es'
+          ? '¿Eliminar última serie?'
+          : 'Delete last set?'
+        : lang === 'es'
+        ? '¿Eliminar serie?'
+        : 'Delete set?',
+      message: isLastSet
+        ? lang === 'es'
+          ? `Esta es la única serie de "${exName}". Si la eliminas, también se quitará el ejercicio de la rutina.`
+          : `This is the only set in "${exName}". Deleting it will also remove the exercise from this routine.`
+        : lang === 'es'
+        ? `¿Seguro que quieres eliminar la serie #${sIdx + 1} de "${exName}"?`
+        : `Delete set #${sIdx + 1} from "${exName}"?`,
+      confirmLabel: lang === 'es' ? 'Eliminar' : 'Delete',
+      cancelLabel: lang === 'es' ? 'Cancelar' : 'Cancel',
+      danger: true,
+      onConfirm: () => {
+        setConfirmDialog(null);
+        handleRemoveDraftSet(exIdx, sIdx);
+      },
+    });
+  };
+
+  const requestRemoveDraftExercise = (exIdx) => {
+    const ex = editingRoutine?.exercises?.[exIdx];
+    const exDef = exerciseMap[ex?.exerciseId];
+    const exName = getExName(exDef);
+    setConfirmDialog({
+      title: lang === 'es' ? '¿Quitar ejercicio?' : 'Remove exercise?',
+      message:
+        lang === 'es'
+          ? `¿Seguro que quieres quitar "${exName}" y todas sus series de esta rutina?`
+          : `Remove "${exName}" and all its sets from this routine?`,
+      confirmLabel: lang === 'es' ? 'Quitar' : 'Remove',
+      cancelLabel: lang === 'es' ? 'Cancelar' : 'Cancel',
+      danger: true,
+      onConfirm: () => {
+        setConfirmDialog(null);
+        setEditingRoutine((prev) => {
+          if (!prev) return prev;
+          const next = (prev.exercises || []).filter((_, i) => i !== exIdx);
+          return { ...prev, exercises: next };
+        });
+      },
     });
   };
 
@@ -708,6 +775,45 @@ export default function RoutinesView({
               </div>
 
               <div className="form-group">
+                <label>
+                  {lang === 'es' ? 'Rotación Automática' : 'Auto Rotation Cycle'}
+                </label>
+                <select
+                  value={editingRoutine.cycleCategory || ''}
+                  onChange={(e) =>
+                    setEditingRoutine({
+                      ...editingRoutine,
+                      cycleCategory: e.target.value,
+                    })
+                  }
+                >
+                  <option value="">
+                    {lang === 'es'
+                      ? 'Automático (detectar por nombre/músculos)'
+                      : 'Auto-detect (by name / muscles)'}
+                  </option>
+                  <option value="upper">
+                    {lang === 'es'
+                      ? 'Tren Superior (Pecho / Espalda / Hombros / Brazos)'
+                      : 'Upper Body (Chest / Back / Shoulders / Arms)'}
+                  </option>
+                  <option value="abs">
+                    {lang === 'es' ? 'Abdomen (Abs / Core)' : 'Abs / Core'}
+                  </option>
+                  <option value="legs">
+                    {lang === 'es'
+                      ? 'Piernas (Cuádriceps / Femoral / Glúteo)'
+                      : 'Legs (Quads / Hamstrings / Glutes)'}
+                  </option>
+                  <option value="custom">
+                    {lang === 'es'
+                      ? 'Sin rotación fija (enviar al final al terminar)'
+                      : 'No fixed cycle (move to end on completion)'}
+                  </option>
+                </select>
+              </div>
+
+              <div className="form-group">
                 <label>{t.routines.routineNotesLabel}</label>
                 <input
                   type="text"
@@ -848,15 +954,7 @@ export default function RoutinesView({
                           <button
                             type="button"
                             className="icon-btn-subtle danger"
-                            onClick={() => {
-                              const next = editingRoutine.exercises.filter(
-                                (_, i) => i !== exIdx
-                              );
-                              setEditingRoutine({
-                                ...editingRoutine,
-                                exercises: next,
-                              });
-                            }}
+                            onClick={() => requestRemoveDraftExercise(exIdx)}
                             title={
                               lang === 'es'
                                 ? 'Quitar ejercicio de la rutina'
@@ -915,18 +1013,31 @@ export default function RoutinesView({
                       {/* Sets Table inside Routine Editor */}
                       <div className="draft-sets-table">
                         <div className="draft-sets-thead">
+                          <span aria-hidden="true" />
                           <span>{lang === 'es' ? 'SERIE' : 'SET'}</span>
                           <span>
                             {lang === 'es' ? 'PESO' : 'WEIGHT'} (
                             {unit.toUpperCase()})
                           </span>
                           <span>REPS</span>
-                          <span>RPE</span>
-                          <span />
                         </div>
 
                         {(exItem.sets || []).map((s, sIdx) => (
                           <div key={sIdx} className="draft-set-row">
+                            <button
+                              type="button"
+                              className="set-delete-btn"
+                              onClick={() => requestRemoveDraftSet(exIdx, sIdx)}
+                              title={
+                                lang === 'es' ? 'Borrar serie' : 'Delete set'
+                              }
+                              aria-label={
+                                lang === 'es' ? 'Borrar serie' : 'Delete set'
+                              }
+                            >
+                              <Trash2 size={13} />
+                            </button>
+
                             <button
                               type="button"
                               className={`set-type-badge type-${s.type || 'normal'}`}
@@ -942,6 +1053,7 @@ export default function RoutinesView({
 
                             <input
                               type="number"
+                              inputMode="decimal"
                               step="any"
                               className="draft-set-input"
                               value={
@@ -970,6 +1082,7 @@ export default function RoutinesView({
 
                             <input
                               type="number"
+                              inputMode="numeric"
                               step="1"
                               className="draft-set-input"
                               value={s.reps === '' ? '' : s.reps}
@@ -991,43 +1104,6 @@ export default function RoutinesView({
                                 });
                               }}
                             />
-
-                            <input
-                              type="number"
-                              step="0.5"
-                              min="5"
-                              max="10"
-                              className="draft-set-input rpe-input"
-                              value={s.rpe ?? 8}
-                              onChange={(e) => {
-                                const raw = e.target.value;
-                                const nextExs = [...editingRoutine.exercises];
-                                const nextSets = [...nextExs[exIdx].sets];
-                                nextSets[sIdx] = {
-                                  ...nextSets[sIdx],
-                                  rpe: raw === '' ? '' : Number(raw),
-                                };
-                                nextExs[exIdx] = {
-                                  ...nextExs[exIdx],
-                                  sets: nextSets,
-                                };
-                                setEditingRoutine({
-                                  ...editingRoutine,
-                                  exercises: nextExs,
-                                });
-                              }}
-                            />
-
-                            <button
-                              type="button"
-                              className="set-delete-btn"
-                              onClick={() => handleRemoveDraftSet(exIdx, sIdx)}
-                              title={
-                                lang === 'es' ? 'Borrar serie' : 'Delete set'
-                              }
-                            >
-                              <X size={14} />
-                            </button>
                           </div>
                         ))}
 
@@ -1250,6 +1326,17 @@ export default function RoutinesView({
         dragState={routinesGridReorder.dragState}
         followerRef={routinesGridReorder.followerRef}
         lang={lang}
+      />
+
+      <ConfirmModal
+        open={Boolean(confirmDialog)}
+        title={confirmDialog?.title}
+        message={confirmDialog?.message}
+        confirmLabel={confirmDialog?.confirmLabel}
+        cancelLabel={confirmDialog?.cancelLabel}
+        danger={confirmDialog?.danger ?? true}
+        onConfirm={() => confirmDialog?.onConfirm?.()}
+        onCancel={() => setConfirmDialog(null)}
       />
     </div>
   );

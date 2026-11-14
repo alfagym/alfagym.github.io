@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import confetti from 'canvas-confetti';
 import {
   Play,
@@ -46,6 +46,7 @@ import {
   getExerciseItemKey,
 } from '../hooks/useLongPressReorder';
 import ExerciseMediaModal from './ExerciseMediaModal';
+import ConfirmModal from './ConfirmModal';
 
 const SET_TYPE_ORDER = ['normal', 'warmup', 'dropset', 'failure'];
 const SUPERSET_GROUPS = [null, 'A', 'B', 'C'];
@@ -65,6 +66,10 @@ export default function LiveWorkoutLogger({
   bellEnabled = true,
   onToggleBellSound,
   onPreviewBellSound,
+  restAudioMode = 'background',
+  onCycleRestAudioMode,
+  notifPermission = 'default',
+  onEnableNotifications,
   exercisesLibrary,
   onAddCustomExercise,
   routines,
@@ -85,6 +90,16 @@ export default function LiveWorkoutLogger({
   const [muscleFilter, setMuscleFilter] = useState('all');
   const [platePopover, setPlatePopover] = useState(null); // { exIdx, weight }
   const [completedSummary, setCompletedSummary] = useState(null);
+  const [confirmDialog, setConfirmDialog] = useState(null);
+  const finishingLockRef = useRef(false);
+
+  useEffect(() => {
+    finishingLockRef.current = false;
+  }, [activeWorkout?.id]);
+
+  useEffect(() => {
+    if (!activeWorkout) setConfirmDialog(null);
+  }, [activeWorkout]);
 
   // Quick custom exercise inside modal
   const [creatingCustom, setCreatingCustom] = useState(false);
@@ -341,6 +356,54 @@ export default function LiveWorkoutLogger({
     });
   };
 
+  const requestRemoveSet = (exIdx, setIdx) => {
+    const ex = activeWorkout?.exercises?.[exIdx];
+    const isLastSet = (ex?.sets?.length || 0) <= 1;
+    const exName = ex?.name || (lang === 'es' ? 'este ejercicio' : 'this exercise');
+    setConfirmDialog({
+      title: isLastSet
+        ? lang === 'es'
+          ? '¿Eliminar última serie?'
+          : 'Delete last set?'
+        : lang === 'es'
+        ? '¿Eliminar serie?'
+        : 'Delete set?',
+      message: isLastSet
+        ? lang === 'es'
+          ? `Esta es la única serie de "${exName}". Si la eliminas, también se quitará el ejercicio del entrenamiento.`
+          : `This is the only set left in "${exName}". Deleting it will also remove the exercise from this workout.`
+        : lang === 'es'
+        ? `¿Seguro que quieres eliminar la serie #${setIdx + 1} de "${exName}"?`
+        : `Are you sure you want to delete set #${setIdx + 1} from "${exName}"?`,
+      confirmLabel: lang === 'es' ? 'Eliminar' : 'Delete',
+      cancelLabel: lang === 'es' ? 'Cancelar' : 'Cancel',
+      danger: true,
+      onConfirm: () => {
+        setConfirmDialog(null);
+        handleRemoveSet(exIdx, setIdx);
+      },
+    });
+  };
+
+  const requestRemoveExercise = (exIdx) => {
+    const ex = activeWorkout?.exercises?.[exIdx];
+    const exName = ex?.name || (lang === 'es' ? 'este ejercicio' : 'this exercise');
+    setConfirmDialog({
+      title: lang === 'es' ? '¿Eliminar ejercicio?' : 'Remove exercise?',
+      message:
+        lang === 'es'
+          ? `Se eliminará "${exName}" con todas sus series del entrenamiento actual.`
+          : `"${exName}" and all its sets will be removed from the current workout.`,
+      confirmLabel: lang === 'es' ? 'Eliminar' : 'Remove',
+      cancelLabel: lang === 'es' ? 'Cancelar' : 'Cancel',
+      danger: true,
+      onConfirm: () => {
+        setConfirmDialog(null);
+        handleRemoveExercise(exIdx);
+      },
+    });
+  };
+
   const handleAddExerciseToActive = (exerciseObj) => {
     const prevSets = getPreviousExerciseSets(workouts, exerciseObj.id);
     const defaultWeight = prevSets[0]?.weight ?? (exerciseObj.equipment === 'bodyweight' ? 0 : 95);
@@ -411,7 +474,8 @@ export default function LiveWorkoutLogger({
   };
 
   const handleCompleteWorkoutClick = () => {
-    if (!activeWorkout) return;
+    if (!activeWorkout || finishingLockRef.current) return;
+    finishingLockRef.current = true;
     const prList = [];
     const cleanedExercises = (activeWorkout.exercises || [])
       .map((exItem) => {
@@ -929,9 +993,21 @@ export default function LiveWorkoutLogger({
             type="button"
             className="discard-workout-btn"
             onClick={() => {
-              if (window.confirm(t.workout.confirmCancel)) {
-                onCancelWorkout();
-              }
+              setConfirmDialog({
+                title:
+                  lang === 'es'
+                    ? '¿Descartar entrenamiento?'
+                    : 'Discard workout?',
+                message: t.workout.confirmCancel,
+                confirmLabel: lang === 'es' ? 'Descartar' : 'Discard',
+                cancelLabel:
+                  lang === 'es' ? 'Seguir entrenando' : 'Keep training',
+                danger: true,
+                onConfirm: () => {
+                  setConfirmDialog(null);
+                  onCancelWorkout();
+                },
+              });
             }}
           >
             <X size={15} />
@@ -1102,8 +1178,12 @@ export default function LiveWorkoutLogger({
                     <button
                       type="button"
                       className="ex-delete-btn"
-                      onClick={() => handleRemoveExercise(exIdx)}
-                      title="Remove Exercise"
+                      onClick={() => requestRemoveExercise(exIdx)}
+                      title={
+                        lang === 'es'
+                          ? 'Eliminar ejercicio'
+                          : 'Remove Exercise'
+                      }
                     >
                       <Trash2 size={15} />
                     </button>
@@ -1193,11 +1273,11 @@ export default function LiveWorkoutLogger({
                 {/* Hevy Set Table */}
                 <div className="hevy-sets-table">
                   <div className="hevy-sets-thead">
+                    <span aria-hidden="true" />
                     <span>{t.workout.setCol}</span>
                     <span>{t.workout.prevCol}</span>
                     <span>{unit.toUpperCase()}</span>
                     <span>{t.workout.repsCol}</span>
-                    <span>{t.workout.rpeCol}</span>
                     <span>{t.workout.doneCol}</span>
                   </div>
 
@@ -1227,6 +1307,21 @@ export default function LiveWorkoutLogger({
                           setObj.completed ? 'completed-row' : ''
                         }`}
                       >
+                        {/* Delete Set Button — isolated on far left */}
+                        <button
+                          type="button"
+                          className="remove-set-btn-left"
+                          onClick={() => requestRemoveSet(exIdx, setIdx)}
+                          title={
+                            lang === 'es' ? 'Eliminar serie' : 'Delete Set'
+                          }
+                          aria-label={
+                            lang === 'es' ? 'Eliminar serie' : 'Delete Set'
+                          }
+                        >
+                          <Trash2 size={13} />
+                        </button>
+
                         {/* Set Type / Number Badge */}
                         <button
                           type="button"
@@ -1241,7 +1336,7 @@ export default function LiveWorkoutLogger({
                           {badgeLabel}
                         </button>
 
-                        {/* Previous Set Column (Click to Auto-fill) */}
+                        {/* Previous Set Column + Optional PR Badge */}
                         <button
                           type="button"
                           className="prev-set-cell"
@@ -1251,12 +1346,17 @@ export default function LiveWorkoutLogger({
                           title={t.workout.clickPrevHint}
                         >
                           {prevSet ? (
-                            <span>
+                            <span className="prev-set-text">
                               {formatWeightValue(prevSet.weight, unit)} {unit} ×{' '}
                               {prevSet.reps}
                             </span>
                           ) : (
                             <span className="text-muted">—</span>
+                          )}
+                          {setObj.isPR && (
+                            <span className="row-pr-pill" title="Personal Record!">
+                              🏆 PR
+                            </span>
                           )}
                         </button>
 
@@ -1264,6 +1364,7 @@ export default function LiveWorkoutLogger({
                         <div className="set-input-cell">
                           <input
                             type="number"
+                            inputMode="decimal"
                             step="any"
                             min="0"
                             value={displayedWeight}
@@ -1283,6 +1384,7 @@ export default function LiveWorkoutLogger({
                         <div className="set-input-cell">
                           <input
                             type="number"
+                            inputMode="numeric"
                             min="0"
                             value={setObj.reps}
                             onChange={(e) =>
@@ -1297,32 +1399,7 @@ export default function LiveWorkoutLogger({
                           />
                         </div>
 
-                        {/* RPE Selector */}
-                        <div className="set-rpe-cell">
-                          <select
-                            value={setObj.rpe || ''}
-                            onChange={(e) =>
-                              handleUpdateSetField(
-                                exIdx,
-                                setIdx,
-                                'rpe',
-                                e.target.value
-                              )
-                            }
-                          >
-                            <option value="">—</option>
-                            <option value="6">6</option>
-                            <option value="7">7</option>
-                            <option value="7.5">7.5</option>
-                            <option value="8">8</option>
-                            <option value="8.5">8.5</option>
-                            <option value="9">9</option>
-                            <option value="9.5">9.5</option>
-                            <option value="10">10</option>
-                          </select>
-                        </div>
-
-                        {/* Complete Checkmark + Delete Row */}
+                        {/* Isolated Complete Checkmark on far right */}
                         <div className="set-action-cell">
                           <button
                             type="button"
@@ -1330,23 +1407,13 @@ export default function LiveWorkoutLogger({
                               setObj.completed ? 'checked' : ''
                             }`}
                             onClick={() => handleToggleSetComplete(exIdx, setIdx)}
+                            aria-label={
+                              lang === 'es'
+                                ? 'Marcar serie completada'
+                                : 'Toggle set complete'
+                            }
                           >
                             <Check size={16} strokeWidth={3} />
-                          </button>
-
-                          {setObj.isPR && (
-                            <span className="row-pr-pill" title="Personal Record!">
-                              🏆 PR
-                            </span>
-                          )}
-
-                          <button
-                            type="button"
-                            className="remove-set-x"
-                            onClick={() => handleRemoveSet(exIdx, setIdx)}
-                            title="Delete Set"
-                          >
-                            <X size={13} />
                           </button>
                         </div>
                       </div>
@@ -1428,7 +1495,52 @@ export default function LiveWorkoutLogger({
             </div>
 
             <div className="rest-timer-btns">
-              {onToggleBellSound && (
+              {onCycleRestAudioMode && (
+                <button
+                  type="button"
+                  className={`rest-mode-pill-btn mode-${
+                    bellEnabled ? restAudioMode : 'off'
+                  }`}
+                  onClick={() => {
+                    unlockGymAudio();
+                    onCycleRestAudioMode();
+                  }}
+                  title={
+                    lang === 'es'
+                      ? 'Cambiar modo de alarma y música (Fondo / 100% Música / Bloqueo / Off)'
+                      : 'Switch bell & music mode (Mix / 100% Music / Lock / Off)'
+                  }
+                >
+                  {!bellEnabled || restAudioMode === 'off'
+                    ? '🔕 Off'
+                    : restAudioMode === 'music100'
+                    ? '🎵 100%'
+                    : restAudioMode === 'lockscreen'
+                    ? lang === 'es'
+                      ? '🔒 Bloqueo'
+                      : '🔒 Lock'
+                    : lang === 'es'
+                    ? '🔔 Fondo'
+                    : '🔔 Mix'}
+                </button>
+              )}
+              {onEnableNotifications &&
+                notifPermission !== 'granted' &&
+                notifPermission !== 'unsupported' && (
+                  <button
+                    type="button"
+                    className="rest-notif-pill-btn"
+                    onClick={onEnableNotifications}
+                    title={
+                      lang === 'es'
+                        ? 'Activar notificaciones en iPhone cuando termine el descanso'
+                        : 'Enable iPhone notifications when rest ends'
+                    }
+                  >
+                    {lang === 'es' ? '📲 Avisos' : '📲 Alerts'}
+                  </button>
+                )}
+              {!onCycleRestAudioMode && onToggleBellSound && (
                 <button
                   type="button"
                   className={`rest-bell-btn ${bellEnabled ? 'active' : 'muted'}`}
@@ -1629,6 +1741,17 @@ export default function LiveWorkoutLogger({
         dragState={liveReorder.dragState}
         followerRef={liveReorder.followerRef}
         lang={lang}
+      />
+
+      <ConfirmModal
+        open={Boolean(confirmDialog)}
+        title={confirmDialog?.title}
+        message={confirmDialog?.message}
+        confirmLabel={confirmDialog?.confirmLabel}
+        cancelLabel={confirmDialog?.cancelLabel}
+        danger={confirmDialog?.danger ?? true}
+        onConfirm={() => confirmDialog?.onConfirm?.()}
+        onCancel={() => setConfirmDialog(null)}
       />
     </div>
   );

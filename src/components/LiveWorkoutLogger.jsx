@@ -630,26 +630,6 @@ export default function LiveWorkoutLogger({
   if (!activeWorkout) {
     return (
       <div className="logger-hub-container">
-        {/* Hero Quick Start Card */}
-        <div className="quick-start-hero">
-          <div className="quick-start-info">
-            <div className="badge-pill-blue">
-              <Flame size={14} />
-              <span>ALFA GYM LIVE LOGGER</span>
-            </div>
-            <h2>{t.workout.startEmptyTitle}</h2>
-            <p>{t.workout.startEmptyDesc}</p>
-          </div>
-          <button
-            type="button"
-            className="start-empty-workout-btn"
-            onClick={onStartEmptyWorkout}
-          >
-            <Play size={20} fill="currentColor" />
-            <span>{t.workout.startEmptyBtn}</span>
-          </button>
-        </div>
-
         {/* Start from Routines Grid */}
         <div className="hub-section">
           <div className="hub-section-header">
@@ -823,6 +803,26 @@ export default function LiveWorkoutLogger({
             </div>
           </div>
         )}
+
+        {/* Hero Quick Start Card (Bottom) */}
+        <div className="quick-start-hero">
+          <div className="quick-start-info">
+            <div className="badge-pill-blue">
+              <Flame size={14} />
+              <span>ALFA GYM LIVE LOGGER</span>
+            </div>
+            <h2>{t.workout.startEmptyTitle}</h2>
+            <p>{t.workout.startEmptyDesc}</p>
+          </div>
+          <button
+            type="button"
+            className="start-empty-workout-btn"
+            onClick={onStartEmptyWorkout}
+          >
+            <Play size={20} fill="currentColor" />
+            <span>{t.workout.startEmptyBtn}</span>
+          </button>
+        </div>
 
         <ExerciseMediaModal
           exercise={previewExercise}

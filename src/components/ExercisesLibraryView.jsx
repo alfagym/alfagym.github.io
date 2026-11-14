@@ -11,6 +11,7 @@ import {
   Check,
 } from 'lucide-react';
 import MuscleHeatmapSVG from './MuscleHeatmapSVG';
+import ExerciseVideoPlayer from './ExerciseVideoPlayer';
 import {
   getExerciseStats,
   formatWeightValue,
@@ -226,6 +227,11 @@ export default function ExercisesLibraryView({
                       <span className="equip-tag">
                         {t.equipment[ex.equipment]}
                       </span>
+                      {ex.videoUrl && ex.videoUrl.toLowerCase().endsWith('.mp4') && (
+                        <span className="equip-tag ex-video-badge" title="Tiene video demostrativo">
+                          ▶ Video
+                        </span>
+                      )}
                     </div>
                   </div>
                   {stats.best1RM > 0 && (
@@ -275,43 +281,27 @@ export default function ExercisesLibraryView({
               </div>
             )}
 
-            {(selectedExercise.videoUrl || selectedExercise.imageUrl || selectedExercise.thumbnailUrl) && (() => {
-              const hasDemoVideo = Boolean(
-                selectedExercise.videoUrl &&
-                  selectedExercise.videoUrl.toLowerCase().endsWith('.mp4')
-              );
-              const fallbackDemoImg =
-                selectedExercise.imageUrl ||
-                (!hasDemoVideo ? selectedExercise.videoUrl : null) ||
-                selectedExercise.thumbnailUrl;
-              return (
-                <div className="ex-demo-video-box">
-                  {hasDemoVideo && !videoError ? (
-                    <video
-                      key={selectedExercise.videoUrl}
-                      src={selectedExercise.videoUrl}
-                      poster={
-                        selectedExercise.imageUrl ||
-                        selectedExercise.thumbnailUrl ||
-                        undefined
-                      }
-                      onError={() => setVideoError(true)}
-                      autoPlay
-                      loop
-                      muted
-                      playsInline
-                      className="ex-demo-video"
-                    />
-                  ) : fallbackDemoImg ? (
-                    <img
-                      src={fallbackDemoImg}
-                      alt={getExName(selectedExercise)}
-                      className="ex-demo-video"
-                    />
-                  ) : null}
-                </div>
-              );
-            })()}
+            {(selectedExercise.videoUrl || selectedExercise.imageUrl || selectedExercise.thumbnailUrl) && (
+              <div className="ex-demo-video-box">
+                <ExerciseVideoPlayer
+                  videoUrl={
+                    selectedExercise.videoUrl &&
+                    selectedExercise.videoUrl.toLowerCase().endsWith('.mp4')
+                      ? selectedExercise.videoUrl
+                      : null
+                  }
+                  posterUrl={selectedExercise.thumbnailUrl}
+                  alt={getExName(selectedExercise)}
+                  lang={lang}
+                  isFallbackMedia={Boolean(selectedExercise.isFallbackMedia)}
+                  fallbackImage={
+                    selectedExercise.imageUrl ||
+                    selectedExercise.thumbnailUrl ||
+                    selectedExercise.videoUrl
+                  }
+                />
+              </div>
+            )}
 
             {/* Personal Records Strip */}
             <div className="ex-pr-strip">

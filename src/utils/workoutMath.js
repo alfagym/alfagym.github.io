@@ -345,14 +345,15 @@ export function rotateRoutinesOnComplete(
   }
 
   const buckets = { upper: [], abs: [], legs: [] };
-  const customList = [];
+  const isCustomSlot = new Array(remaining.length).fill(false);
 
-  for (const r of remaining) {
+  for (let i = 0; i < remaining.length; i++) {
+    const r = remaining[i];
     const cat = getRoutineCycleCategory(r, exerciseMap);
     if (CYCLE_CATEGORIES.includes(cat)) {
       buckets[cat].push(r);
     } else {
-      customList.push(r);
+      isCustomSlot[i] = true;
     }
   }
 
@@ -372,7 +373,170 @@ export function rotateRoutinesOnComplete(
     }
   }
 
-  return [...scheduled, ...customList, completedRt];
+  let schedIdx = 0;
+  const rebuiltRemaining = remaining.map((r, i) =>
+    isCustomSlot[i] ? r : scheduled[schedIdx++]
+  );
+
+  return [...rebuiltRemaining, completedRt];
+}
+
+// ============================================================================
+// Routine Recency Helpers (DST-safe local calendar day math)
+// ============================================================================
+const DAY_MS = 86400000;
+
+/**
+ * Convert a Date or date string into a local-calendar UTC day serial,
+ * guarding YYYY-MM-DD against UTC midnight shift and calendar rollover.
+ */
+export function toLocalCalendarDaySerial(input) {
+  if (input === null || input === undefined || input === '') return null;
+  if (typeof input === 'string') {
+    const raw = input.trim();
+    const dateOnlyMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (dateOnlyMatch) {
+      const y = Number(dateOnlyMatch[1]);
+      const m = Number(dateOnlyMatch[2]);
+      const d = Number(dateOnlyMatch[3]);
+      if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+      const utcEpochMs = Date.UTC(y, m - 1, d);
+      const probe = new Date(utcEpochMs);
+      if (
+        probe.getUTCFullYear() !== y ||
+        probe.getUTCMonth() !== m - 1 ||
+        probe.getUTCDate() !== d
+      ) {
+        return null;
+      }
+      return Math.floor(utcEpochMs / DAY_MS);
+    }
+  }
+
+  const dt = input instanceof Date ? input : new Date(input);
+  if (Number.isNaN(dt.getTime())) return null;
+  return Math.floor(Date.UTC(dt.getFullYear(), dt.getMonth(), dt.getDate()) / DAY_MS);
+}
+
+/**
+ * Normalize a routine name (accent-folded lowercase, collapsed whitespace) for matching.
+ */
+export function normalizeRoutineKeyName(name) {
+  return String(name || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+/**
+ * Compute days elapsed since each routine's most recent completed workout in O(W + R).
+ */
+export function buildRoutineLastDoneMap(
+  routines = [],
+  workouts = [],
+  nowInput = new Date()
+) {
+  const result = {};
+  if (!Array.isArray(routines) || routines.length === 0) return result;
+
+  const todaySerial =
+    toLocalCalendarDaySerial(nowInput) ?? toLocalCalendarDaySerial(new Date());
+  if (todaySerial === null) return result;
+
+  const activeRoutineIds = new Set();
+  const normCounts = new Map();
+  for (const rt of routines) {
+    if (!rt?.id) continue;
+    activeRoutineIds.add(rt.id);
+    const norm = normalizeRoutineKeyName(rt.name);
+    if (norm) {
+      normCounts.set(norm, (normCounts.get(norm) || 0) + 1);
+    }
+  }
+
+  const uniqueNormNames = new Set();
+  for (const [norm, count] of normCounts.entries()) {
+    if (count === 1) uniqueNormNames.add(norm);
+  }
+
+  const byRoutineId = new Map();
+  const byNormName = new Map();
+
+  for (const wk of workouts || []) {
+    const serial = toLocalCalendarDaySerial(wk?.date);
+    if (serial === null) continue;
+
+    if (wk.routineId) {
+      const prev = byRoutineId.get(wk.routineId);
+      if (prev === undefined || serial > prev) {
+        byRoutineId.set(wk.routineId, serial);
+      }
+    }
+
+    // Apply name fallback only when workout isn't bound to another existing routine
+    if (!wk.routineId || !activeRoutineIds.has(wk.routineId)) {
+      const norm = normalizeRoutineKeyName(wk.name);
+      if (norm && uniqueNormNames.has(norm)) {
+        const prev = byNormName.get(norm);
+        if (prev === undefined || serial > prev) {
+          byNormName.set(norm, serial);
+        }
+      }
+    }
+  }
+
+  for (const rt of routines) {
+    if (!rt?.id) continue;
+    const idBest = byRoutineId.has(rt.id) ? byRoutineId.get(rt.id) : null;
+    const norm = normalizeRoutineKeyName(rt.name);
+    const nameBest =
+      norm && uniqueNormNames.has(norm) && byNormName.has(norm)
+        ? byNormName.get(norm)
+        : null;
+
+    let bestSerial = null;
+    if (idBest !== null && nameBest !== null) {
+      bestSerial = Math.max(idBest, nameBest);
+    } else {
+      bestSerial = idBest ?? nameBest;
+    }
+
+    result[rt.id] =
+      bestSerial === null ? null : Math.max(0, todaySerial - bestSerial);
+  }
+
+  return result;
+}
+
+/**
+ * Format localized label and tone class for a routine's days-since-last-done value.
+ */
+export function formatRoutineLastDoneBadge(daysAgo, lang = 'es') {
+  if (daysAgo === null || daysAgo === undefined || Number.isNaN(Number(daysAgo))) {
+    return {
+      label: lang === 'es' ? 'Sin realizar' : 'Not done yet',
+      tone: 'is-never',
+    };
+  }
+  const d = Math.max(0, Math.floor(Number(daysAgo)));
+  if (d === 0) {
+    return {
+      label: lang === 'es' ? 'Hoy (0 días)' : 'Today (0d)',
+      tone: 'is-today',
+    };
+  }
+  if (d === 1) {
+    return {
+      label: lang === 'es' ? 'Hace 1 día' : '1 day ago',
+      tone: 'is-recent',
+    };
+  }
+  return {
+    label: lang === 'es' ? `Hace ${d} días` : `${d} days ago`,
+    tone: d >= 7 ? 'is-due' : 'is-normal',
+  };
 }
 
 export function seedInitialSmartRoutineOrder(

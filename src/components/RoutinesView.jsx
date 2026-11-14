@@ -18,8 +18,15 @@ import {
   Sparkles,
   GripVertical,
   ChevronDown,
+  Film,
 } from 'lucide-react';
-import { formatWeightValue, toLbs } from '../utils/workoutMath';
+import {
+  formatWeightValue,
+  toLbs,
+  toLocalCalendarDaySerial,
+  buildRoutineLastDoneMap,
+  formatRoutineLastDoneBadge,
+} from '../utils/workoutMath';
 import {
   useLongPressReorder,
   DragFollowerPortal,
@@ -30,6 +37,9 @@ import {
 } from '../hooks/useLongPressReorder';
 import ExerciseMediaModal from './ExerciseMediaModal';
 import ConfirmModal from './ConfirmModal';
+
+const hasMp4Video = (exObj) =>
+  Boolean(exObj?.videoUrl && /\.mp4($|\?)/i.test(exObj.videoUrl));
 
 const SET_TYPE_ORDER = ['normal', 'warmup', 'dropset', 'failure'];
 
@@ -67,6 +77,7 @@ export default function RoutinesView({
   t,
   routines,
   setRoutines,
+  workouts = [],
   exercisesLibrary,
   onAddCustomExercise,
   onStartRoutineWorkout,
@@ -81,6 +92,35 @@ export default function RoutinesView({
   const [exSearch, setExSearch] = useState('');
   const [pickerMuscle, setPickerMuscle] = useState('all');
   const [confirmDialog, setConfirmDialog] = useState(null);
+  const [brokenThumbIds, setBrokenThumbIds] = useState({});
+  const [todaySerial, setTodaySerial] = useState(() =>
+    toLocalCalendarDaySerial(new Date())
+  );
+
+  useEffect(() => {
+    const refreshToday = () => {
+      const next = toLocalCalendarDaySerial(new Date());
+      setTodaySerial((prev) => (prev === next ? prev : next));
+    };
+    const onVisChange = () => {
+      if (document.visibilityState === 'visible') refreshToday();
+    };
+    document.addEventListener('visibilitychange', onVisChange);
+    window.addEventListener('focus', refreshToday);
+    window.addEventListener('pageshow', refreshToday);
+    const id = setInterval(refreshToday, 60000);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisChange);
+      window.removeEventListener('focus', refreshToday);
+      window.removeEventListener('pageshow', refreshToday);
+      clearInterval(id);
+    };
+  }, []);
+
+  const lastDoneByRoutine = useMemo(
+    () => buildRoutineLastDoneMap(routines, workouts, new Date()),
+    [routines, workouts, todaySerial]
+  );
 
   // Custom exercise creator inside routine modal
   const [showCustomCreator, setShowCustomCreator] = useState(false);
@@ -289,6 +329,7 @@ export default function RoutinesView({
 
     const normalizedExercises = (editingRoutine.exercises || []).map((ex) => ({
       ...stripExerciseUid(ex),
+      _uid: ex._uid || createExerciseUid(),
       restSeconds: Math.max(0, Number(ex.restSeconds) || 45),
       note: ex.note || '',
       sets: (ex.sets || []).map((s) => ({
@@ -582,6 +623,8 @@ export default function RoutinesView({
           );
           const isDraggingCard =
             routinesGridReorder.dragState?.activeIdx === rtIdx;
+          const daysAgo = lastDoneByRoutine[rt.id] ?? null;
+          const badge = formatRoutineLastDoneBadge(daysAgo, lang);
           return (
             <div
               key={rt.id}
@@ -595,10 +638,15 @@ export default function RoutinesView({
             >
               <div className="routine-card-header">
                 <div>
-                  <span className="folder-tag">
-                    {folders.find((f) => f.id === rt.folder)?.label ||
-                      t.routines.folderCustom}
-                  </span>
+                  <div className="routine-card-tags-row">
+                    <span className="folder-tag">
+                      {folders.find((f) => f.id === rt.folder)?.label ||
+                        t.routines.folderCustom}
+                    </span>
+                    <span className={`routine-last-done-badge ${badge.tone}`}>
+                      {badge.label}
+                    </span>
+                  </div>
                   <div className="routine-card-title-row">
                     {filteredRoutines.length > 1 && (
                       <GripVertical
@@ -664,6 +712,8 @@ export default function RoutinesView({
                 getExName={getExName}
                 lang={lang}
                 unit={unit}
+                brokenThumbIds={brokenThumbIds}
+                setBrokenThumbIds={setBrokenThumbIds}
                 onPreviewExercise={setPreviewExercise}
                 onReorder={(fromIdx, toIdx) =>
                   handleReorderCardExercises(rt.id, fromIdx, toIdx)
@@ -852,7 +902,7 @@ export default function RoutinesView({
                       {/* Exercise Top Row: Thumbnail, Draggable Exercise Name, Swap Selector, Order Up/Down, Delete */}
                       <div className="draft-ex-header">
                         <div className="draft-ex-title-wrap">
-                          {exObj?.thumbnailUrl && (
+                          {exObj && (
                             <button
                               type="button"
                               className="thumb-zoom-btn"
@@ -863,11 +913,27 @@ export default function RoutinesView({
                                   : 'Tap to enlarge exercise image/video'
                               }
                             >
-                              <img
-                                src={exObj.thumbnailUrl}
-                                alt={getExName(exObj)}
-                                className="routine-line-thumb"
-                              />
+                              {exObj.thumbnailUrl &&
+                              !brokenThumbIds[exObj.id] ? (
+                                <img
+                                  src={exObj.thumbnailUrl}
+                                  alt={getExName(exObj)}
+                                  className="routine-line-thumb"
+                                  onError={() =>
+                                    setBrokenThumbIds((prev) => ({
+                                      ...prev,
+                                      [exObj.id]: true,
+                                    }))
+                                  }
+                                />
+                              ) : (
+                                <span className="thumb-fallback-icon">
+                                  <Film size={14} />
+                                </span>
+                              )}
+                              {hasMp4Video(exObj) && (
+                                <span className="thumb-zoom-badge">▶</span>
+                              )}
                             </button>
                           )}
                           <div
@@ -1268,25 +1334,43 @@ export default function RoutinesView({
                         (ex.nameEn || '').toLowerCase().includes(q);
                       return matchesMuscle && matchesSearch;
                     })
-                    .slice(0, 24)
                     .map((ex) => (
-                      <button
-                        key={ex.id}
-                        type="button"
-                        className="picker-ex-chip"
-                        onClick={() => handleAddExToRoutineDraft(ex.id)}
-                      >
-                        {ex.thumbnailUrl ? (
-                          <img
-                            src={ex.thumbnailUrl}
-                            alt=""
-                            className="picker-chip-thumb"
-                          />
-                        ) : (
-                          <Plus size={13} />
-                        )}
-                        <span>{getExName(ex)}</span>
-                      </button>
+                      <div key={ex.id} className="picker-ex-chip-group">
+                        <button
+                          type="button"
+                          className="picker-ex-chip"
+                          onClick={() => handleAddExToRoutineDraft(ex.id)}
+                        >
+                          {ex.thumbnailUrl && !brokenThumbIds[ex.id] ? (
+                            <img
+                              src={ex.thumbnailUrl}
+                              alt=""
+                              className="picker-chip-thumb"
+                              onError={() =>
+                                setBrokenThumbIds((prev) => ({
+                                  ...prev,
+                                  [ex.id]: true,
+                                }))
+                              }
+                            />
+                          ) : (
+                            <Plus size={13} />
+                          )}
+                          <span>{getExName(ex)}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="picker-preview-btn"
+                          onClick={() => setPreviewExercise(ex)}
+                          title={
+                            lang === 'es'
+                              ? 'Ver video / imagen'
+                              : 'Preview video / image'
+                          }
+                        >
+                          <Film size={13} />
+                        </button>
+                      </div>
                     ))}
                 </div>
               </div>
@@ -1348,6 +1432,8 @@ function RoutineCardBreakdown({
   getExName,
   lang,
   unit,
+  brokenThumbIds,
+  setBrokenThumbIds,
   onPreviewExercise,
   onReorder,
 }) {
@@ -1375,7 +1461,7 @@ function RoutineCardBreakdown({
             >
               <div className="routine-ex-line-left">
                 <span className="routine-ex-name">
-                  {exObj?.thumbnailUrl && (
+                  {exObj && (
                     <button
                       type="button"
                       className="thumb-zoom-btn"
@@ -1386,11 +1472,26 @@ function RoutineCardBreakdown({
                           : 'Tap to enlarge exercise image/video'
                       }
                     >
-                      <img
-                        src={exObj.thumbnailUrl}
-                        alt={getExName(exObj)}
-                        className="routine-line-thumb"
-                      />
+                      {exObj.thumbnailUrl && !brokenThumbIds?.[exObj.id] ? (
+                        <img
+                          src={exObj.thumbnailUrl}
+                          alt={getExName(exObj)}
+                          className="routine-line-thumb"
+                          onError={() =>
+                            setBrokenThumbIds?.((prev) => ({
+                              ...prev,
+                              [exObj.id]: true,
+                            }))
+                          }
+                        />
+                      ) : (
+                        <span className="thumb-fallback-icon">
+                          <Film size={14} />
+                        </span>
+                      )}
+                      {hasMp4Video(exObj) && (
+                        <span className="thumb-zoom-badge">▶</span>
+                      )}
                     </button>
                   )}
                   <span

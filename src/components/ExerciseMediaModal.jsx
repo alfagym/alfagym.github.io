@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { X, Maximize2, Film, Image as ImageIcon, Info } from 'lucide-react';
+import { X, Film, Image as ImageIcon, Info } from 'lucide-react';
+import ExerciseVideoPlayer from './ExerciseVideoPlayer';
 
 export default function ExerciseMediaModal({
   exercise,
@@ -17,10 +18,8 @@ export default function ExerciseMediaModal({
       : exercise?.thumbnailUrl || exercise?.videoUrl);
 
   const [viewMode, setViewMode] = useState(hasVideo ? 'video' : 'image');
-  const [videoError, setVideoError] = useState(false);
 
   useEffect(() => {
-    setVideoError(false);
     setViewMode(
       exercise?.videoUrl && exercise.videoUrl.toLowerCase().endsWith('.mp4')
         ? 'video'
@@ -85,7 +84,7 @@ export default function ExerciseMediaModal({
         </div>
 
         {/* Toggle between Video and Full Image if both exist */}
-        {hasVideo && !videoError && (exercise.imageUrl || exercise.thumbnailUrl) && (
+        {hasVideo && (exercise.imageUrl || exercise.thumbnailUrl) && (
           <div className="media-lightbox-tabs">
             <button
               type="button"
@@ -111,18 +110,14 @@ export default function ExerciseMediaModal({
         )}
 
         <div className="media-lightbox-stage">
-          {hasVideo && !videoError && viewMode === 'video' ? (
-            <video
-              key={exercise.videoUrl}
-              src={exercise.videoUrl}
-              poster={exercise.imageUrl || exercise.thumbnailUrl || undefined}
-              onError={() => setVideoError(true)}
-              autoPlay
-              loop
-              muted
-              playsInline
-              controls
-              className="media-lightbox-visual"
+          {hasVideo && viewMode === 'video' ? (
+            <ExerciseVideoPlayer
+              videoUrl={exercise.videoUrl}
+              posterUrl={exercise.thumbnailUrl}
+              alt={name}
+              lang={lang}
+              isFallbackMedia={Boolean(exercise.isFallbackMedia)}
+              fallbackImage={fullImageUrl}
             />
           ) : fullImageUrl ? (
             <img

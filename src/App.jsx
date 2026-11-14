@@ -1,4 +1,11 @@
-import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useCallback,
+} from 'react';
 import {
   Dumbbell,
   PlayCircle,
@@ -17,6 +24,7 @@ import {
   EXERCISES_LIBRARY,
   DEFAULT_ROUTINES,
   createInitialMeasurements,
+  resolveExerciseWithMedia,
 } from './data/gymData';
 import {
   formatClock,
@@ -53,7 +61,7 @@ import AccountModal from './components/AccountModal';
 import './App.css';
 
 /* global __BUILD_TIMESTAMP__ */
-const FALLBACK_TIMESTAMP = '2:04 AM - 11/14/2026';
+const FALLBACK_TIMESTAMP = '2:51 AM - 11/14/2026';
 const BUILD_TIMESTAMP =
   typeof __BUILD_TIMESTAMP__ !== 'undefined'
     ? __BUILD_TIMESTAMP__
@@ -492,6 +500,70 @@ export default function App() {
   const pendingUpdateUrlRef = useRef(null);
   const restTimerActiveRef = useRef(false);
   const skipRestTimerRef = useRef(null);
+  const cloudAutoSyncTimerRef = useRef(null);
+  const latestCloudSnapshotRef = useRef(null);
+
+  latestCloudSnapshotRef.current = {
+    currentUser,
+    activeUserKey,
+    cloudConfig,
+    workouts,
+    routines,
+    customExercises,
+    measurements,
+    accounts,
+  };
+
+  const cancelPendingCloudAutoSync = useCallback(() => {
+    if (cloudAutoSyncTimerRef.current) {
+      clearTimeout(cloudAutoSyncTimerRef.current);
+      cloudAutoSyncTimerRef.current = null;
+    }
+  }, []);
+
+  const markCycleSeededForUser = useCallback(
+    (targetKey = activeUserKey) => {
+      if (!targetKey) return;
+      try {
+        localStorage.setItem(`alfa_gym_cycle_seeded_v1_${targetKey}`, '1');
+      } catch {
+        // Ignore storage errors
+      }
+    },
+    [activeUserKey]
+  );
+
+  const scheduleCloudAutoSync = useCallback(() => {
+    cancelPendingCloudAutoSync();
+    cloudAutoSyncTimerRef.current = setTimeout(async () => {
+      cloudAutoSyncTimerRef.current = null;
+      const snap = latestCloudSnapshotRef.current;
+      if (!snap || !snap.currentUser) return;
+      const allowedOwner = snap.cloudConfig?.ownerUserKey || 'raydel';
+      if (snap.activeUserKey !== allowedOwner) return;
+      if (!snap.cloudConfig?.autoSync || !snap.cloudConfig?.token) return;
+      try {
+        const res = await pushToGitHubGist({
+          token: snap.cloudConfig.token,
+          gistId: snap.cloudConfig.gistId,
+          payload: {
+            workouts: snap.workouts,
+            routines: snap.routines,
+            customExercises: snap.customExercises,
+            measurements: snap.measurements,
+            accounts: snap.accounts,
+          },
+        });
+        setCloudConfig((prev) => ({
+          ...prev,
+          gistId: res.gistId,
+          lastSynced: res.updatedAt,
+        }));
+      } catch {
+        // Silent background error
+      }
+    }, 1500);
+  }, [cancelPendingCloudAutoSync]);
 
   useEffect(() => {
     bellEnabledRef.current = bellEnabled;
@@ -502,13 +574,15 @@ export default function App() {
     installGlobalAudioUnlock();
     registerGymServiceWorker();
     return () => {
+      cancelPendingCloudAutoSync();
       stopBakedRestTimerAudio();
       setRestAudioKeepAlive(false);
     };
-  }, []);
+  }, [cancelPendingCloudAutoSync]);
 
   // Switch / Load user data cleanly on login or register
   const handleSelectActiveUser = (userObj) => {
+    cancelPendingCloudAutoSync();
     stopBakedRestTimerAudio();
     armedTimerIdRef.current = null;
     setCurrentUser(userObj);
@@ -873,24 +947,56 @@ export default function App() {
 
   const t = translations[lang] || translations.es;
 
-  const fullExercisesLibrary = useMemo(() => {
-    return [...customExercises, ...EXERCISES_LIBRARY];
-  }, [customExercises]);
-
   const fullExerciseMap = useMemo(() => {
-    const map = { ...BASE_EXERCISE_MAP };
+    const map = {};
+    for (const ex of EXERCISES_LIBRARY) {
+      if (ex?.id) {
+        map[ex.id] = resolveExerciseWithMedia(ex, BASE_EXERCISE_MAP) || ex;
+      }
+    }
     for (const ex of customExercises) {
-      if (ex?.id) map[ex.id] = ex;
+      if (ex?.id) {
+        map[ex.id] = resolveExerciseWithMedia(ex, BASE_EXERCISE_MAP) || ex;
+      }
     }
     return map;
   }, [customExercises]);
 
+  const fullExercisesLibrary = useMemo(() => {
+    const seen = new Set();
+    const list = [];
+    for (const ex of customExercises) {
+      if (ex?.id && !seen.has(ex.id)) {
+        seen.add(ex.id);
+        const resolved =
+          fullExerciseMap[ex.id] ||
+          resolveExerciseWithMedia(ex, BASE_EXERCISE_MAP) ||
+          ex;
+        list.push(resolved);
+      }
+    }
+    for (const ex of EXERCISES_LIBRARY) {
+      if (ex?.id && !seen.has(ex.id)) {
+        seen.add(ex.id);
+        const resolved =
+          fullExerciseMap[ex.id] ||
+          resolveExerciseWithMedia(ex, BASE_EXERCISE_MAP) ||
+          ex;
+        list.push(resolved);
+      }
+    }
+    return list;
+  }, [customExercises, fullExerciseMap]);
+
   const handleAddCustomExercise = (exData) => {
-    const created = {
+    const rawCreated = {
       id: `custom-${Date.now()}`,
       ...exData,
     };
+    const created =
+      resolveExerciseWithMedia(rawCreated, BASE_EXERCISE_MAP) || rawCreated;
     setCustomExercises((prev) => [created, ...prev]);
+    scheduleCloudAutoSync();
     return created;
   };
 
@@ -1249,9 +1355,22 @@ export default function App() {
         prev ? { ...prev, routineId: newRtId } : prev
       );
     }
+    markCycleSeededForUser();
+    scheduleCloudAutoSync();
   };
 
+  const handleUpdateRoutinesFromView = useCallback(
+    (updaterOrNext) => {
+      markCycleSeededForUser();
+      setRoutines(updaterOrNext);
+      scheduleCloudAutoSync();
+    },
+    [markCycleSeededForUser, scheduleCloudAutoSync]
+  );
+
   const handleReorderRoutines = (fromIdx, toIdx) => {
+    if (fromIdx === toIdx) return;
+    markCycleSeededForUser();
     setRoutines((prev) => {
       if (
         fromIdx < 0 ||
@@ -1267,6 +1386,7 @@ export default function App() {
       next.splice(toIdx, 0, moved);
       return next;
     });
+    scheduleCloudAutoSync();
   };
 
   const handleDeleteRoutineById = (routineId) => {
@@ -1283,7 +1403,9 @@ export default function App() {
         // Ignore storage errors
       }
     }
+    markCycleSeededForUser();
     setRoutines((prev) => prev.filter((r) => r.id !== routineId));
+    scheduleCloudAutoSync();
   };
 
   const handleResetDefaultRoutines = () => {
@@ -1305,6 +1427,7 @@ export default function App() {
         exercises: ensureExercisesUids(rt.exercises),
       }));
       setRoutines(seedInitialSmartRoutineOrder(restored, [], fullExerciseMap));
+      scheduleCloudAutoSync();
     }
   };
 
@@ -1312,6 +1435,7 @@ export default function App() {
     if (!completedRecord?.id) return;
     if (completedWorkoutIdsRef.current.has(completedRecord.id)) return;
     completedWorkoutIdsRef.current.add(completedRecord.id);
+    cancelPendingCloudAutoSync();
 
     const updatedWorkouts = [completedRecord, ...workouts];
     setWorkouts(updatedWorkouts);
@@ -1349,14 +1473,20 @@ export default function App() {
         completedRecord.routineId,
         fullExerciseMap
       );
+      markCycleSeededForUser();
       setRoutines(updatedRoutines);
     }
 
     setActiveWorkout(null);
     skipRestTimer();
 
-    // Auto Sync to GitHub if enabled
-    if (cloudConfig.autoSync && cloudConfig.token) {
+    // Auto Sync to GitHub if enabled (guarded to owner profile)
+    const allowedOwner = cloudConfig?.ownerUserKey || 'raydel';
+    if (
+      cloudConfig.autoSync &&
+      cloudConfig.token &&
+      activeUserKey === allowedOwner
+    ) {
       try {
         const res = await pushToGitHubGist({
           token: cloudConfig.token,
@@ -1386,8 +1516,10 @@ export default function App() {
   };
 
   const handleRestoreCloudPayload = (data) => {
+    cancelPendingCloudAutoSync();
     if (Array.isArray(data.workouts)) setWorkouts(data.workouts);
     if (Array.isArray(data.routines)) {
+      markCycleSeededForUser();
       setRoutines(
         data.routines.map((rt) => ({
           ...rt,
@@ -1637,7 +1769,8 @@ export default function App() {
             unit={unit}
             t={t}
             routines={routines}
-            setRoutines={setRoutines}
+            setRoutines={handleUpdateRoutinesFromView}
+            workouts={workouts}
             exercisesLibrary={fullExercisesLibrary}
             onAddCustomExercise={handleAddCustomExercise}
             onStartRoutineWorkout={handleStartRoutineWorkout}

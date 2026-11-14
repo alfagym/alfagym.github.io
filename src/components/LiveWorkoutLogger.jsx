@@ -24,6 +24,7 @@ import {
   Bell,
   BellOff,
   GripVertical,
+  Film,
 } from 'lucide-react';
 import {
   calculate1RM,
@@ -37,6 +38,9 @@ import {
   playGymSound,
   unlockGymAudio,
   computeWorkoutElapsedSeconds,
+  toLocalCalendarDaySerial,
+  buildRoutineLastDoneMap,
+  formatRoutineLastDoneBadge,
 } from '../utils/workoutMath';
 import {
   useLongPressReorder,
@@ -91,7 +95,32 @@ export default function LiveWorkoutLogger({
   const [platePopover, setPlatePopover] = useState(null); // { exIdx, weight }
   const [completedSummary, setCompletedSummary] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState(null);
+  const [todaySerial, setTodaySerial] = useState(() =>
+    toLocalCalendarDaySerial(new Date())
+  );
+  const [expandedHubRoutines, setExpandedHubRoutines] = useState({});
+  const [brokenThumbIds, setBrokenThumbIds] = useState({});
   const finishingLockRef = useRef(false);
+
+  useEffect(() => {
+    const refreshToday = () => {
+      const next = toLocalCalendarDaySerial(new Date());
+      setTodaySerial((prev) => (prev === next ? prev : next));
+    };
+    const onVis = () => {
+      if (document.visibilityState === 'visible') refreshToday();
+    };
+    const timer = setInterval(refreshToday, 60000);
+    document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('focus', refreshToday);
+    window.addEventListener('pageshow', refreshToday);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('focus', refreshToday);
+      window.removeEventListener('pageshow', refreshToday);
+    };
+  }, []);
 
   useEffect(() => {
     finishingLockRef.current = false;
@@ -119,6 +148,15 @@ export default function LiveWorkoutLogger({
     }
     return map;
   }, [exercisesLibrary]);
+
+  const hasMp4Video = (exObj) =>
+    Boolean(
+      exObj?.videoUrl && String(exObj.videoUrl).toLowerCase().endsWith('.mp4')
+    );
+
+  const lastDoneByRoutine = useMemo(() => {
+    return buildRoutineLastDoneMap(routines, workouts, new Date());
+  }, [routines, workouts, todaySerial]);
 
   const handleReorderActiveExercises = (fromIdx, toIdx) => {
     setActiveWorkout((prev) => {
@@ -359,7 +397,10 @@ export default function LiveWorkoutLogger({
   const requestRemoveSet = (exIdx, setIdx) => {
     const ex = activeWorkout?.exercises?.[exIdx];
     const isLastSet = (ex?.sets?.length || 0) <= 1;
-    const exName = ex?.name || (lang === 'es' ? 'este ejercicio' : 'this exercise');
+    const exName =
+      getExName(exerciseMap[ex?.exerciseId]) ||
+      ex?.name ||
+      (lang === 'es' ? 'este ejercicio' : 'this exercise');
     setConfirmDialog({
       title: isLastSet
         ? lang === 'es'
@@ -387,7 +428,10 @@ export default function LiveWorkoutLogger({
 
   const requestRemoveExercise = (exIdx) => {
     const ex = activeWorkout?.exercises?.[exIdx];
-    const exName = ex?.name || (lang === 'es' ? 'este ejercicio' : 'this exercise');
+    const exName =
+      getExName(exerciseMap[ex?.exerciseId]) ||
+      ex?.name ||
+      (lang === 'es' ? 'este ejercicio' : 'this exercise');
     setConfirmDialog({
       title: lang === 'es' ? '¿Eliminar ejercicio?' : 'Remove exercise?',
       message:
@@ -655,6 +699,15 @@ export default function LiveWorkoutLogger({
               );
               const isDraggingCard =
                 hubRoutinesReorder.dragState?.activeIdx === rtIdx;
+              const daysAgo =
+                lastDoneByRoutine && rt.id in lastDoneByRoutine
+                  ? lastDoneByRoutine[rt.id]
+                  : null;
+              const badge = formatRoutineLastDoneBadge(daysAgo, lang);
+              const allExs = rt.exercises || [];
+              const isExpanded = Boolean(expandedHubRoutines[rt.id]);
+              const visibleExs = isExpanded ? allExs : allExs.slice(0, 4);
+              const hiddenCount = Math.max(0, allExs.length - 4);
               return (
                 <div
                   key={rt.id}
@@ -677,38 +730,83 @@ export default function LiveWorkoutLogger({
                       )}
                       <h4>{rt.name}</h4>
                     </div>
-                    <span className="routine-meta-badge">
-                      {rt.exercises?.length || 0} {t.routines.exercisesCount} •{' '}
-                      {totalSets} {t.routines.setsCount}
-                    </span>
+                    <div className="hub-routine-meta-row">
+                      <span className="routine-meta-badge">
+                        {rt.exercises?.length || 0} {t.routines.exercisesCount} •{' '}
+                        {totalSets} {t.routines.setsCount}
+                      </span>
+                      <span className={`routine-last-done-badge ${badge.tone}`}>
+                        {badge.label}
+                      </span>
+                    </div>
                   </div>
                   <div className="hub-routine-ex-preview">
-                    {(rt.exercises || []).slice(0, 4).map((exItem, idx) => {
+                    {visibleExs.map((exItem, idx) => {
                       const exObj = exerciseMap[exItem.exerciseId];
+                      const showImg =
+                        Boolean(exObj?.thumbnailUrl) &&
+                        !brokenThumbIds[exObj?.id];
                       return (
-                        <span
-                          key={idx}
+                        <button
+                          key={exItem._uid || `${exItem.exerciseId}-${idx}`}
+                          type="button"
                           className="ex-preview-chip clickable-chip"
-                          onClick={() => exObj && setPreviewExercise(exObj)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (exObj) setPreviewExercise(exObj);
+                          }}
                           title={
                             lang === 'es'
                               ? 'Toca para ver el ejercicio en grande'
                               : 'Tap to view exercise in large view'
                           }
                         >
-                          {exObj?.thumbnailUrl && (
+                          {showImg ? (
                             <img
                               src={exObj.thumbnailUrl}
                               alt=""
                               className="chip-mini-thumb"
+                              onError={() =>
+                                exObj?.id &&
+                                setBrokenThumbIds((prev) => ({
+                                  ...prev,
+                                  [exObj.id]: true,
+                                }))
+                              }
                             />
+                          ) : (
+                            <Film size={12} className="text-blue shrink-0" />
                           )}
                           <span>
                             {exItem.sets?.length || 3}× {getExName(exObj)}
                           </span>
-                        </span>
+                          {hasMp4Video(exObj) && (
+                            <span aria-hidden="true">▶</span>
+                          )}
+                        </button>
                       );
                     })}
+                    {hiddenCount > 0 && (
+                      <button
+                        type="button"
+                        className="ex-preview-chip ex-preview-more-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setExpandedHubRoutines((prev) => ({
+                            ...prev,
+                            [rt.id]: !prev[rt.id],
+                          }));
+                        }}
+                      >
+                        {isExpanded
+                          ? lang === 'es'
+                            ? 'Ver menos'
+                            : 'Show less'
+                          : lang === 'es'
+                          ? `+${hiddenCount} más`
+                          : `+${hiddenCount} more`}
+                      </button>
+                    )}
                   </div>
                   <div className="hub-routine-actions-row">
                     {onEditRoutineFromHub && (
@@ -779,13 +877,14 @@ export default function LiveWorkoutLogger({
                     className="repeat-mini-btn"
                     onClick={() =>
                       onStartRoutineWorkout({
+                        id: wk.routineId || null,
                         name: wk.name,
                         notes: wk.notes,
-                        exercises: wk.exercises.map((e) => ({
+                        exercises: (wk.exercises || []).map((e) => ({
                           exerciseId: e.exerciseId,
-                          restSeconds: 90,
+                          restSeconds: Number(e.restSeconds) || 45,
                           note: e.note || '',
-                          sets: e.sets.map((s) => ({
+                          sets: (e.sets || []).map((s) => ({
                             type: s.type || 'normal',
                             weight: s.weight,
                             reps: s.reps,
@@ -1064,24 +1163,37 @@ export default function LiveWorkoutLogger({
                 {/* Exercise Card Header */}
                 <div className="live-ex-card-header">
                   <div className="live-ex-title-with-thumb">
-                    {exObj.thumbnailUrl && (
-                      <button
-                        type="button"
-                        className="thumb-zoom-btn"
-                        onClick={() => setPreviewExercise(exObj)}
-                        title={
-                          lang === 'es'
-                            ? 'Toca para ver la imagen/video en grande'
-                            : 'Tap to enlarge exercise image/video'
-                        }
-                      >
+                    <button
+                      type="button"
+                      className="thumb-zoom-btn"
+                      onClick={() => setPreviewExercise(exObj)}
+                      title={
+                        lang === 'es'
+                          ? 'Toca para ver la imagen/video en grande'
+                          : 'Tap to enlarge exercise image/video'
+                      }
+                    >
+                      {exObj.thumbnailUrl && !brokenThumbIds[exObj.id] ? (
                         <img
                           src={exObj.thumbnailUrl}
                           alt={getExName(exObj)}
                           className="hevy-ex-thumb"
+                          onError={() =>
+                            setBrokenThumbIds((prev) => ({
+                              ...prev,
+                              [exObj.id]: true,
+                            }))
+                          }
                         />
-                      </button>
-                    )}
+                      ) : (
+                        <span className="thumb-fallback-icon">
+                          <Film size={15} />
+                        </span>
+                      )}
+                      {hasMp4Video(exObj) && (
+                        <span className="thumb-zoom-badge">▶</span>
+                      )}
+                    </button>
                     <div
                       className="live-ex-title-group ex-drag-handle"
                       title={
@@ -1684,27 +1796,40 @@ export default function LiveWorkoutLogger({
               {filteredExercises.map((ex) => (
                 <div key={ex.id} className="modal-ex-row">
                   <div className="modal-ex-left">
-                    {ex.thumbnailUrl && (
-                      <button
-                        type="button"
-                        className="thumb-zoom-btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setPreviewExercise(ex);
-                        }}
-                        title={
-                          lang === 'es'
-                            ? 'Ver imagen en grande'
-                            : 'View large image'
-                        }
-                      >
+                    <button
+                      type="button"
+                      className="thumb-zoom-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPreviewExercise(ex);
+                      }}
+                      title={
+                        lang === 'es'
+                          ? 'Ver imagen/video en grande'
+                          : 'View large image/video'
+                      }
+                    >
+                      {ex.thumbnailUrl && !brokenThumbIds[ex.id] ? (
                         <img
                           src={ex.thumbnailUrl}
                           alt={getExName(ex)}
                           className="routine-line-thumb"
+                          onError={() =>
+                            setBrokenThumbIds((prev) => ({
+                              ...prev,
+                              [ex.id]: true,
+                            }))
+                          }
                         />
-                      </button>
-                    )}
+                      ) : (
+                        <span className="thumb-fallback-icon">
+                          <Film size={14} />
+                        </span>
+                      )}
+                      {hasMp4Video(ex) && (
+                        <span className="thumb-zoom-badge">▶</span>
+                      )}
+                    </button>
                     <div
                       className="modal-ex-text-click"
                       onClick={() => handleAddExerciseToActive(ex)}

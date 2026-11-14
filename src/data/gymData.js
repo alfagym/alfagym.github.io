@@ -34,7 +34,7 @@ export const EXERCISES_LIBRARY = [
     secondaryMuscles: ["back"],
     equipment: "dumbbell",
     defaultRestSeconds: 45,
-    thumbnailUrl: "https://pump-app.s3.eu-west-2.amazonaws.com/profile-images/raysantana-ef5eb679-6d9d-4612-8000-dfc96dda5d47.jpg",
+    thumbnailUrl: "https://pump-app.s3.eu-west-2.amazonaws.com/exercise-thumbnails/04101201-Dumbbell-Single-Leg-Split-Squat_Thighs_thumbnail_@3x.jpg",
     videoUrl: "https://pump-app.s3.eu-west-2.amazonaws.com/exercise-assets/04101201-Dumbbell-Single-Leg-Split-Squat_Thighs_.mp4",
     imageUrl: "https://pump-app.s3.eu-west-2.amazonaws.com/profile-images/raysantana-014da3dd-4b11-4c74-a72c-5b95b51ee111.jpg",
     tipsEs: "Ejercicio oficial de tu rutina Hevy (Curtsy Bulgarian Split Squat). Descanso sugerido: 45s.",
@@ -594,7 +594,7 @@ export const EXERCISES_LIBRARY = [
     secondaryMuscles: [],
     equipment: "cable",
     defaultRestSeconds: 45,
-    thumbnailUrl: "https://pump-app.s3.eu-west-2.amazonaws.com/profile-images/raysantana-49bbf073-93a6-44b8-86c6-b36860a8b6ab.jpg",
+    thumbnailUrl: "https://pump-app.s3.eu-west-2.amazonaws.com/exercise-thumbnails/66071201-Resistance-Band-Lateral-Walk-(male)_Hips_thumbnail_@3x.jpg",
     videoUrl: "https://pump-app.s3.eu-west-2.amazonaws.com/exercise-assets/66071201-Resistance-Band-Lateral-Walk-(male)_Hips_.mp4",
     imageUrl: "https://pump-app.s3.eu-west-2.amazonaws.com/profile-images/raysantana-70a1ba93-fdc4-4735-b96c-d8a905e2b237.jpg",
     tipsEs: "Ejercicio oficial de tu rutina Hevy (Side Kick with Cable). Descanso sugerido: 45s.",
@@ -621,7 +621,7 @@ export const EXERCISES_LIBRARY = [
     secondaryMuscles: ["glutes"],
     equipment: "kettlebell",
     defaultRestSeconds: 45,
-    thumbnailUrl: "https://pump-app.s3.eu-west-2.amazonaws.com/profile-images/raysantana-e72f36c6-1399-4a95-ab80-86db566bb316.jpg",
+    thumbnailUrl: "https://pump-app.s3.eu-west-2.amazonaws.com/exercise-thumbnails/05341201-Kettlebell-Goblet-Squat_Thighs-FIX_thumbnail_@3x.jpg",
     videoUrl: "https://pump-app.s3.eu-west-2.amazonaws.com/exercise-assets/05341201-Kettlebell-Goblet-Squat_Thighs-FIX_.mp4",
     imageUrl: "https://pump-app.s3.eu-west-2.amazonaws.com/profile-images/raysantana-6a9e7fbc-2afb-42da-86b2-d8dd11a0e226.jpg",
     tipsEs: "Ejercicio oficial de tu rutina Hevy (Cyclist Goblet Squat). Descanso sugerido: 45s.",
@@ -1463,6 +1463,219 @@ export const EXERCISES_LIBRARY = [
     tipsEn: 'Great for conditioning and fat loss without holding the handrails.',
   },
 ];
+
+let cachedBaseMap = null;
+let cachedNormEntries = null;
+
+function getInternalBaseMap() {
+  if (!cachedBaseMap) {
+    cachedBaseMap = {};
+    for (const item of EXERCISES_LIBRARY) {
+      if (item?.id) cachedBaseMap[item.id] = item;
+    }
+  }
+  return cachedBaseMap;
+}
+
+function normalizeMediaLookupText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isMp4MediaUrl(url) {
+  return typeof url === 'string' && url.trim().toLowerCase().endsWith('.mp4');
+}
+
+function getNormalizedLibraryEntries() {
+  if (!cachedNormEntries) {
+    cachedNormEntries = EXERCISES_LIBRARY.map((libEx) => {
+      const es = normalizeMediaLookupText(libEx.nameEs);
+      const en = normalizeMediaLookupText(libEx.nameEn);
+      const tokens = new Set(
+        `${es} ${en}`
+          .split(' ')
+          .filter((tk) => tk.length >= 3)
+      );
+      return { ex: libEx, es, en, tokens };
+    });
+  }
+  return cachedNormEntries;
+}
+
+const SYNONYM_MEDIA_RULES = [
+  [/\b(heel tap[a-z]*|toque[a-z]* al talon|toque[a-z]* de talon|oblicu[a-z]*)\b/, () => 'hevy-567fb505'],
+  [/\b(calf|calves|pantorrill[a-z]*|gemel[a-z]*|soleo|elevacion[a-z]* de talon[a-z]*|talones)\b/, (t) => (/\b(seated|sentad[a-z]*|soleo)\b/.test(t) ? 'seated-calf-raise' : 'standing-calf-raise')],
+  [/\b(rdl|ruman[a-z]*|romanian)\b/, (t) => (/\b(dumbbell|mancuern[a-z]*)\b/.test(t) ? 'romanian-deadlift-dumbbell' : 'romanian-deadlift-barbell')],
+  [/\b(piernas estiradas|straight leg|stiff leg)\b/, () => 'hevy-2a48e443'],
+  [/\b(sumo)\b/, () => 'hevy-d20d7bbe'],
+  [/\b(deadlift|peso muerto)\b/, () => 'deadlift-conventional'],
+  [/\b(femoral|isquio[a-z]*|hamstring[a-z]*|leg curl|curl de pierna[a-z]*|curl femoral)\b/, (t) => (/\b(lying|tumbad[a-z]*|acostad[a-z]*|echad[a-z]*)\b/.test(t) ? 'lying-leg-curl' : 'seated-leg-curl')],
+  [/\b(hip thrust|empuje de cadera)\b/, () => 'barbell-hip-thrust'],
+  [/\b(glute bridge|puente)\b/, () => 'hevy-cda23948'],
+  [/\b(side kick|patada lateral|band walk|caminata lateral)\b/, () => 'hevy-5df64af8'],
+  [/\b(abduct[a-z]*|abduc[a-z]*)\b/, () => 'hevy-f4b4c6ee'],
+  [/\b(adduct[a-z]*|adduc[a-z]*|aductor[a-z]*|aduccion[a-z]*)\b/, () => 'hevy-8bebfed6'],
+  [/\b(patada[a-z]* de tricep[a-z]*|tricep[a-z]* kickback)\b/, () => 'tricep-rope-pushdown'],
+  [/\b(kickback[a-z]*|patada de gluteo|patada en polea|donkey)\b/, () => 'hevy-acb2751d'],
+  [/\b(goblet|ciclista|cyclist)\b/, () => 'hevy-c7b609b9'],
+  [/\b(hack)\b/, () => 'hack-squat-machine'],
+  [/\b(curtsy)\b/, () => 'hevy-71d8cb4a'],
+  [/\b(bulgar[a-z]*|split squat)\b/, () => 'bulgarian-split-squat'],
+  [/\b(lunge[a-z]*|zancada[a-z]*|desplante[a-z]*)\b/, (t) => (/\b(reverse|invertid[a-z]*|atras)\b/.test(t) ? 'hevy-818ba121' : 'hevy-a733cc5b')],
+  [/\b(step up|cajon|banco alto)\b/, () => 'hevy-bf6ece89'],
+  [/\b(leg press|prensa)\b/, (t) => (/\b(45|inclinad[a-z]*)\b/.test(t) ? 'leg-press-45' : 'hevy-0eb695c9')],
+  [/\b(leg extension|extension de pierna[a-z]*|extension de cuadriceps)\b/, () => 'leg-extension-machine'],
+  [/\b(squat|sentadilla[a-z]*)\b/, (t) => (/\b(smith)\b/.test(t) ? 'hevy-ddcc3821' : 'barbell-back-squat')],
+  [/\b(swing|pesa rusa|kettlebell)\b/, () => 'hevy-f8a0fcca'],
+  [/\b(wheel|rueda)\b/, () => 'hevy-99d5f10e'],
+  [/\b(plank|plancha)\b/, () => 'hevy-c6c9b8a0'],
+  [/\b(dead bug|bicho muerto)\b/, () => 'hevy-d8911fc4'],
+  [/\b(leg raise[a-z]*|levantamiento de piernas|elevacion[a-z]* de piernas)\b/, (t) => (/\b(lying|tumbad[a-z]*|acostad[a-z]*|suelo|banco)\b/.test(t) ? 'hevy-09c9f635' : 'hanging-leg-raise')],
+  [/\b(shrug[a-z]*|encogimiento[a-z]* de hombro[a-z]*|trapecio[a-z]*)\b/, () => 'dumbbell-shrugs'],
+  [/\b(crunch[a-z]*|sit up|encogimiento[a-z]*|abdom[a-z]*|core)\b/, (t) => (/\b(cable|polea)\b/.test(t) ? 'cable-crunch' : 'hevy-022df610')],
+  [/\b(incline.*press|press inclinad[a-z]*|incline bench)\b/, (t) => (/\b(smith)\b/.test(t) ? 'incline-smith-press' : /\b(barbell|barra)\b/.test(t) ? 'incline-bench-barbell' : 'incline-bench-dumbbell')],
+  [/\b(bench press|press de banca|press plano|press pecho)\b/, (t) => (/\b(dumbbell|mancuern[a-z]*)\b/.test(t) ? 'flat-bench-dumbbell' : /\b(machine|maquin[a-z]*)\b/.test(t) ? 'chest-press-machine' : 'bench-press-barbell')],
+  [/\b(crossover|fly|flies|apertura[a-z]*|pec deck)\b/, (t) => (/\b(reverse|posterior|deltoid[a-z]*)\b/.test(t) ? 'reverse-pec-deck' : /\b(cable|polea)\b/.test(t) ? 'cable-crossover' : 'pec-deck-machine')],
+  [/\b(lat pulldown|jalon al pecho|jalon dorsal)\b/, () => 'lat-pulldown-wide'],
+  [/\b(pull up[a-z]*|chin up[a-z]*|dominada[a-z]*)\b/, () => 'pull-ups'],
+  [/\b(row|remo)\b/, (t) => (/\b(t bar|pecho apoyado|tbar)\b/.test(t) ? 'chest-supported-tbar-row' : /\b(one arm|una mano|mancuern[a-z]*|dumbbell)\b/.test(t) ? 'one-arm-dumbbell-row' : /\b(barbell|barra)\b/.test(t) ? 'barbell-bent-over-row' : 'seated-cable-row')],
+  [/\b(face pull|tiron a la cara)\b/, () => 'face-pull-cable'],
+  [/\b(lateral raise[a-z]*|elevacion[a-z]* lateral[a-z]*|vuelo[a-z]* lateral[a-z]*)\b/, (t) => (/\b(cable|polea)\b/.test(t) ? 'cable-lateral-raise' : 'dumbbell-lateral-raise')],
+  [/\b(shoulder press|military press|press militar|press hombro[a-z]*)\b/, (t) => (/\b(dumbbell|mancuern[a-z]*)\b/.test(t) ? 'seated-dumbbell-shoulder-press' : /\b(machine|maquin[a-z]*)\b/.test(t) ? 'machine-shoulder-press' : 'overhead-press-barbell')],
+  [/\b(hammer|martillo)\b/, () => 'hammer-curl-dumbbell'],
+  [/\b(preacher|predicador|scott)\b/, () => 'preacher-curl-machine'],
+  [/\b(bayesian)\b/, () => 'bayesian-cable-curl'],
+  [/\b(bicep[a-z]*|curl[a-z]*)\b/, (t) => (/\b(cable|polea)\b/.test(t) ? 'bayesian-cable-curl' : /\b(incline|inclinad[a-z]*)\b/.test(t) ? 'incline-dumbbell-curl' : 'barbell-bicep-curl')],
+  [/\b(skull|rompecraneos|frances)\b/, () => 'skull-crushers-ezbar'],
+  [/\b(tricep[a-z]*|pushdown|extension.*tricep[a-z]*|copa)\b/, (t) => (/\b(overhead|trasnuca|sobre cabeza)\b/.test(t) ? 'overhead-cable-tricep-extension' : 'tricep-rope-pushdown')],
+  [/\b(dip|dips|fondo[a-z]*)\b/, (t) => (/\b(machine|maquin[a-z]*|asistid[a-z]*)\b/.test(t) ? 'tricep-dips-machine' : 'chest-dips')],
+  [/\b(treadmill|cinta|cardio|correr|caminata|eliptica|bici)\b/, () => 'incline-treadmill-walk'],
+];
+
+function findLexicalMediaMatch(ex, activeMap) {
+  const queryText = [ex.nameEs, ex.nameEn, ex.name]
+    .map(normalizeMediaLookupText)
+    .filter(Boolean)
+    .join(' ');
+  if (!queryText) return null;
+
+  const entries = getNormalizedLibraryEntries();
+  const qNormEs = normalizeMediaLookupText(ex.nameEs || ex.name);
+  const qNormEn = normalizeMediaLookupText(ex.nameEn || ex.name);
+
+  for (const entry of entries) {
+    if (
+      (qNormEs && (entry.es === qNormEs || entry.en === qNormEs)) ||
+      (qNormEn && (entry.es === qNormEn || entry.en === qNormEn))
+    ) {
+      return entry.ex;
+    }
+  }
+
+  for (const [pattern, pickId] of SYNONYM_MEDIA_RULES) {
+    if (pattern.test(queryText)) {
+      const target = activeMap[pickId(queryText)];
+      if (target && isMp4MediaUrl(target.videoUrl)) return target;
+    }
+  }
+
+  const qTokens = new Set(queryText.split(' ').filter((tk) => tk.length >= 3));
+  if (qTokens.size >= 2) {
+    let bestEntry = null;
+    let bestScore = 0;
+    for (const entry of entries) {
+      let overlap = 0;
+      for (const tk of qTokens) {
+        if (entry.tokens.has(tk)) overlap++;
+      }
+      if (overlap === 0) continue;
+      const unionSize = qTokens.size + entry.tokens.size - overlap;
+      const jaccard = unionSize > 0 ? overlap / unionSize : 0;
+      if (jaccard >= 0.5 && jaccard > bestScore) {
+        bestScore = jaccard;
+        bestEntry = entry.ex;
+      }
+    }
+    if (bestEntry) return bestEntry;
+  }
+
+  return null;
+}
+
+/**
+ * Resolve verified video/thumbnail media non-destructively for any base or custom exercise.
+ */
+export function resolveExerciseWithMedia(ex, baseMap) {
+  if (!ex || typeof ex !== 'object') return null;
+  const activeMap =
+    baseMap && Object.keys(baseMap).length > 0 ? baseMap : getInternalBaseMap();
+
+  // Level 0: non-destructive merge with known base/Hevy exercise
+  if (ex.id && activeMap[ex.id]) {
+    const base = activeMap[ex.id];
+    const usesOldProfileThumb =
+      typeof ex.thumbnailUrl === 'string' &&
+      (ex.thumbnailUrl.includes('raysantana-') ||
+        (base.imageUrl && ex.thumbnailUrl === base.imageUrl)) &&
+      typeof base.thumbnailUrl === 'string' &&
+      base.thumbnailUrl.includes('/exercise-thumbnails/');
+    return {
+      ...base,
+      ...ex,
+      videoUrl: isMp4MediaUrl(ex.videoUrl) ? ex.videoUrl : base.videoUrl,
+      thumbnailUrl: usesOldProfileThumb
+        ? base.thumbnailUrl
+        : ex.thumbnailUrl || base.thumbnailUrl || null,
+      imageUrl: ex.imageUrl || base.imageUrl,
+      isFallbackMedia: false,
+    };
+  }
+
+  // Level 1: custom exercise already carries its own .mp4
+  if (isMp4MediaUrl(ex.videoUrl)) {
+    return {
+      ...ex,
+      thumbnailUrl: ex.thumbnailUrl || ex.imageUrl || null,
+      isFallbackMedia: Boolean(ex.isFallbackMedia),
+    };
+  }
+
+  // Level 2: bilingual lexical + biomechanical synonym match
+  const lexicalMatch = findLexicalMediaMatch(ex, activeMap);
+  if (lexicalMatch) {
+    return {
+      ...ex,
+      videoUrl: lexicalMatch.videoUrl,
+      thumbnailUrl: ex.thumbnailUrl || lexicalMatch.thumbnailUrl || null,
+      isFallbackMedia: false,
+    };
+  }
+
+  // Level 3: canonical fallback by (primaryMuscle, equipment) -> primaryMuscle -> first verified
+  const fallback =
+    EXERCISES_LIBRARY.find(
+      (item) =>
+        item.primaryMuscle === ex.primaryMuscle &&
+        item.equipment === ex.equipment &&
+        isMp4MediaUrl(item.videoUrl)
+    ) ||
+    EXERCISES_LIBRARY.find(
+      (item) => item.primaryMuscle === ex.primaryMuscle && isMp4MediaUrl(item.videoUrl)
+    ) ||
+    EXERCISES_LIBRARY[0];
+
+  return {
+    ...ex,
+    videoUrl: fallback?.videoUrl || null,
+    thumbnailUrl: ex.thumbnailUrl || fallback?.thumbnailUrl || null,
+    isFallbackMedia: true,
+  };
+}
 
 export const DEFAULT_ROUTINES = [
   {

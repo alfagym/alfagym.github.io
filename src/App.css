@@ -4141,3 +4141,220 @@ body.alfa-dragging-active * {
   background: var(--blue-primary);
   color: #ffffff;
 }
+
+/* ==========================================================================
+   ROUTINE LAST DONE BADGES & META ROWS
+   ========================================================================== */
+
+.hub-routine-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.routine-card-tags-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.routine-last-done-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+}
+
+.routine-last-done-badge.is-today {
+  background: rgba(16, 185, 129, 0.18);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.routine-last-done-badge.is-recent {
+  background: rgba(56, 189, 248, 0.16);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.routine-last-done-badge.is-normal {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.routine-last-done-badge.is-due {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.routine-last-done-badge.is-never {
+  background: rgba(148, 163, 184, 0.12);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+/* Chips expand/collapse button */
+.ex-preview-more-btn {
+  background: rgba(56, 189, 248, 0.14) !important;
+  color: #38bdf8 !important;
+  border: 1px solid rgba(56, 189, 248, 0.3) !important;
+  font-weight: 700 !important;
+  cursor: pointer;
+}
+
+.ex-preview-more-btn:active {
+  transform: scale(0.96);
+}
+
+.thumb-fallback-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  background: rgba(15, 23, 42, 0.8);
+  color: #38bdf8;
+  border-radius: 50%;
+}
+
+.ex-video-badge {
+  background: rgba(56, 189, 248, 0.18) !important;
+  color: #38bdf8 !important;
+  font-weight: 800;
+  border: 1px solid rgba(56, 189, 248, 0.32);
+}
+
+/* ==========================================================================
+   EXERCISE VIDEO PLAYER & LOW POWER MODE OVERLAY
+   ========================================================================== */
+
+.exercise-video-stage-wrap {
+  position: relative;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 12px;
+  background: #000000;
+}
+
+.exercise-video-stage-wrap.empty-stage {
+  min-height: 180px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px dashed var(--border-subtle);
+}
+
+.ios-video-play-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  color: #ffffff;
+  border: none;
+  cursor: pointer;
+  z-index: 10;
+  font-size: 14px;
+  font-weight: 800;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.ios-video-play-overlay:active {
+  background: rgba(0, 0, 0, 0.7);
+  transform: scale(0.98);
+}
+
+.fallback-media-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+  background: rgba(15, 23, 42, 0.85);
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* ==========================================================================
+   ROUTINE PICKER CHIPS & TWO-BUTTON PREVIEW GROUP
+   ========================================================================== */
+
+.routine-picker-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 4px 1px;
+}
+
+.picker-ex-chip-group {
+  display: inline-flex;
+  align-items: stretch;
+  border-radius: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  overflow: hidden;
+  transition: border-color 0.15s ease;
+}
+
+.picker-ex-chip-group:hover {
+  border-color: rgba(56, 189, 248, 0.4);
+}
+
+.picker-ex-chip-group .picker-ex-chip {
+  background: transparent;
+  border: none;
+  padding: 5px 9px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.picker-ex-chip-group .picker-preview-btn {
+  background: rgba(56, 189, 248, 0.1);
+  border: none;
+  border-left: 1px solid var(--border-subtle);
+  padding: 0 7px;
+  color: #38bdf8;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 800;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.picker-ex-chip-group .picker-preview-btn:hover,
+.picker-ex-chip-group .picker-preview-btn:active {
+  background: rgba(56, 189, 248, 0.25);
+  color: #ffffff;
+}

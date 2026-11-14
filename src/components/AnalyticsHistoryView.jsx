@@ -70,16 +70,39 @@ export default function AnalyticsHistoryView({
     };
   }, [workouts, exerciseMap]);
 
-  // Last 28 days calendar grid
+  // Last 28 days calendar grid (local YYYY-MM-DD, immune to UTC-midnight & DST drift)
   const calendarDays = useMemo(() => {
+    const formatLocalYmd = (dateInput) => {
+      if (!dateInput) return '';
+      if (typeof dateInput === 'string') {
+        const trimmed = dateInput.trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+          return trimmed;
+        }
+      }
+      const d = dateInput instanceof Date ? dateInput : new Date(dateInput);
+      if (Number.isNaN(d.getTime())) return '';
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
+    };
+
     const workoutDateSet = new Set(
-      workouts.map((w) => new Date(w.date).toISOString().split('T')[0])
+      workouts.map((w) => formatLocalYmd(w?.date)).filter(Boolean)
     );
     const days = [];
     const now = new Date();
     for (let i = 27; i >= 0; i--) {
-      const d = new Date(now.getTime() - i * 86400000);
-      const iso = d.toISOString().split('T')[0];
+      const d = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate() - i,
+        12,
+        0,
+        0
+      );
+      const iso = formatLocalYmd(d);
       days.push({
         iso,
         dayNum: d.getDate(),
@@ -98,11 +121,12 @@ export default function AnalyticsHistoryView({
 
   const handleRepeatWorkout = (wk) => {
     onStartRoutineWorkout({
+      id: wk.routineId || null,
       name: wk.name,
       notes: wk.notes || '',
       exercises: (wk.exercises || []).map((e) => ({
         exerciseId: e.exerciseId,
-        restSeconds: 90,
+        restSeconds: Number(e.restSeconds) || 45,
         note: e.note || '',
         sets: (e.sets || []).map((s) => ({
           type: s.type || 'normal',

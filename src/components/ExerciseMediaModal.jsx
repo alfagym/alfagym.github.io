@@ -11,13 +11,16 @@ export default function ExerciseMediaModal({
     exercise?.videoUrl && exercise.videoUrl.toLowerCase().endsWith('.mp4')
   );
   const fullImageUrl =
-    !hasVideo && exercise?.videoUrl
+    exercise?.imageUrl ||
+    (!hasVideo && exercise?.videoUrl
       ? exercise.videoUrl
-      : exercise?.thumbnailUrl || exercise?.videoUrl;
+      : exercise?.thumbnailUrl || exercise?.videoUrl);
 
   const [viewMode, setViewMode] = useState(hasVideo ? 'video' : 'image');
+  const [videoError, setVideoError] = useState(false);
 
   useEffect(() => {
+    setVideoError(false);
     setViewMode(
       exercise?.videoUrl && exercise.videoUrl.toLowerCase().endsWith('.mp4')
         ? 'video'
@@ -82,7 +85,7 @@ export default function ExerciseMediaModal({
         </div>
 
         {/* Toggle between Video and Full Image if both exist */}
-        {hasVideo && exercise.thumbnailUrl && (
+        {hasVideo && !videoError && (exercise.imageUrl || exercise.thumbnailUrl) && (
           <div className="media-lightbox-tabs">
             <button
               type="button"
@@ -108,11 +111,12 @@ export default function ExerciseMediaModal({
         )}
 
         <div className="media-lightbox-stage">
-          {hasVideo && viewMode === 'video' ? (
+          {hasVideo && !videoError && viewMode === 'video' ? (
             <video
               key={exercise.videoUrl}
               src={exercise.videoUrl}
-              poster={exercise.thumbnailUrl || undefined}
+              poster={exercise.imageUrl || exercise.thumbnailUrl || undefined}
+              onError={() => setVideoError(true)}
               autoPlay
               loop
               muted

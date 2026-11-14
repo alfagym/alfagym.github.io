@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Dumbbell,
   Search,
@@ -31,7 +31,20 @@ export default function ExercisesLibraryView({
   const [selectedExercise, setSelectedExercise] = useState(
     exercisesLibrary[0] || null
   );
+  const [videoError, setVideoError] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
+
+  useEffect(() => {
+    setVideoError(false);
+  }, [selectedExercise?.id]);
+
+  useEffect(() => {
+    if (!selectedExercise?.id) return;
+    const fresh = exercisesLibrary.find((e) => e.id === selectedExercise.id);
+    if (fresh && fresh !== selectedExercise) {
+      setSelectedExercise(fresh);
+    }
+  }, [exercisesLibrary, selectedExercise]);
 
   // Custom exercise form state
   const [newNameEs, setNewNameEs] = useState('');
@@ -262,31 +275,43 @@ export default function ExercisesLibraryView({
               </div>
             )}
 
-            {(selectedExercise.videoUrl || selectedExercise.thumbnailUrl) && (
-              <div className="ex-demo-video-box">
-                {selectedExercise.videoUrl &&
-                selectedExercise.videoUrl.toLowerCase().endsWith('.mp4') ? (
-                  <video
-                    key={selectedExercise.videoUrl}
-                    src={selectedExercise.videoUrl}
-                    poster={selectedExercise.thumbnailUrl || undefined}
-                    autoPlay
-                    loop
-                    muted
-                    playsInline
-                    className="ex-demo-video"
-                  />
-                ) : (
-                  <img
-                    src={
-                      selectedExercise.videoUrl || selectedExercise.thumbnailUrl
-                    }
-                    alt={getExName(selectedExercise)}
-                    className="ex-demo-video"
-                  />
-                )}
-              </div>
-            )}
+            {(selectedExercise.videoUrl || selectedExercise.imageUrl || selectedExercise.thumbnailUrl) && (() => {
+              const hasDemoVideo = Boolean(
+                selectedExercise.videoUrl &&
+                  selectedExercise.videoUrl.toLowerCase().endsWith('.mp4')
+              );
+              const fallbackDemoImg =
+                selectedExercise.imageUrl ||
+                (!hasDemoVideo ? selectedExercise.videoUrl : null) ||
+                selectedExercise.thumbnailUrl;
+              return (
+                <div className="ex-demo-video-box">
+                  {hasDemoVideo && !videoError ? (
+                    <video
+                      key={selectedExercise.videoUrl}
+                      src={selectedExercise.videoUrl}
+                      poster={
+                        selectedExercise.imageUrl ||
+                        selectedExercise.thumbnailUrl ||
+                        undefined
+                      }
+                      onError={() => setVideoError(true)}
+                      autoPlay
+                      loop
+                      muted
+                      playsInline
+                      className="ex-demo-video"
+                    />
+                  ) : fallbackDemoImg ? (
+                    <img
+                      src={fallbackDemoImg}
+                      alt={getExName(selectedExercise)}
+                      className="ex-demo-video"
+                    />
+                  ) : null}
+                </div>
+              );
+            })()}
 
             {/* Personal Records Strip */}
             <div className="ex-pr-strip">

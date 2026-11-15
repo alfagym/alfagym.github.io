@@ -69,7 +69,7 @@ export default function LiveWorkoutLogger({
   bellEnabled = true,
   onToggleBellSound,
   onPreviewBellSound,
-  restAudioMode = 'background',
+  restAudioMode = 'vibrate',
   onCycleRestAudioMode,
   notifPermission = 'default',
   onEnableNotifications,
@@ -1628,16 +1628,28 @@ export default function LiveWorkoutLogger({
                     onCycleRestAudioMode();
                   }}
                   title={
-                    lang === 'es'
-                      ? 'Activar/silenciar alarma de descanso (no detiene tu música)'
-                      : "Toggle rest alarm (won't stop your music)"
+                    !bellEnabled || restAudioMode === 'off'
+                      ? lang === 'es'
+                        ? 'Alarma silenciada (toca para activar sonido en Modo Vibración)'
+                        : 'Alarm muted (tap to enable sound in Vibrate Mode)'
+                      : restAudioMode === 'music'
+                      ? lang === 'es'
+                        ? 'Modo Música: nunca pausa Spotify/Apple Music (en iPhone requiere quitar modo silencio para sonar)'
+                        : 'Music Mode: never pauses Spotify/Apple Music (requires iPhone Silent Mode OFF for speaker sound)'
+                      : lang === 'es'
+                      ? 'Modo Vibración: suena siempre incluso con el iPhone en modo vibración/silencio'
+                      : 'Vibrate Mode: always rings even when iPhone is in Vibrate/Silent Mode'
                   }
                 >
                   {!bellEnabled || restAudioMode === 'off'
                     ? '🔕 Off'
+                    : restAudioMode === 'music'
+                    ? lang === 'es'
+                      ? '🎵 Música'
+                      : '🎵 Music'
                     : lang === 'es'
-                    ? '🔔 Alarma'
-                    : '🔔 Bell'}
+                    ? '🔊 Vibración'
+                    : '🔊 Vibrate'}
                 </button>
               )}
               {onEnableNotifications &&

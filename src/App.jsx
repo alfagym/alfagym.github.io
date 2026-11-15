@@ -62,7 +62,7 @@ import AccountModal from './components/AccountModal';
 import './App.css';
 
 /* global __BUILD_TIMESTAMP__ */
-const FALLBACK_TIMESTAMP = '11:45 AM - 11/14/2026';
+const FALLBACK_TIMESTAMP = '4:08 PM - 11/15/2026';
 const BUILD_TIMESTAMP =
   typeof __BUILD_TIMESTAMP__ !== 'undefined'
     ? __BUILD_TIMESTAMP__
@@ -847,7 +847,7 @@ export default function App() {
       if (!fromStream && !streamPlayingNow) {
         stopBakedRestTimerAudio();
         if (!alreadyRung && soundAllowed && safeOverdueMs <= MAX_AUDIO_GRACE_MS) {
-          playGymSound('timerDone');
+          playGymSound('timerDone', timerId);
         }
       }
 
@@ -1307,8 +1307,8 @@ export default function App() {
     setBellEnabled(next);
     if (next) {
       if (restAudioMode === 'off') {
-        setRestAudioMode('background');
-        setRestAudioModeState('background');
+        setRestAudioMode('vibrate');
+        setRestAudioModeState('vibrate');
       }
       if (restTimer.active && !restTimer.isPaused && restTimer.endTime) {
         const remMs = restTimer.endTime - Date.now();
@@ -1337,8 +1337,8 @@ export default function App() {
       bellEnabledRef.current = true;
       setBellEnabled(true);
       if (restAudioMode === 'off') {
-        setRestAudioMode('background');
-        setRestAudioModeState('background');
+        setRestAudioMode('vibrate');
+        setRestAudioModeState('vibrate');
       }
     }
     playGymSound('timerDone');
